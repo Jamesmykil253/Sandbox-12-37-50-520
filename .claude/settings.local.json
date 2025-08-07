@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls:*)",
+      "Bash(find:*)",
+      "Bash(rm:*)",
+      "Bash(mkdir:*)",
+      "WebFetch(domain:unite-db.com)",
+      "WebFetch(domain:uniteapi.dev)"
+    ],
+    "deny": []
+  }
+}

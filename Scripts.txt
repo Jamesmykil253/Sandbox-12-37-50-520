@@ -1,0 +1,3152 @@
+// File: Assets/_Project/Scripts/Utilities/StealthDebugReporter.cs
+// Version: 1.1 (Compliant)
+// Fix: Corrected all calls to Logger with the full namespace 'Platformer.Core.Logger' to resolve ambiguity.
+
+using UnityEngine;
+
+namespace Platformer.Utilities
+{
+    [RequireComponent(typeof(CharacterStats))]
+    public class StealthDebugReporter : MonoBehaviour
+    {
+        private CharacterStats _stats;
+
+        private void Awake()
+        {
+            _stats = GetComponent<CharacterStats>();
+            if (_stats == null)
+            {
+                Platformer.Core.Logger.Error(Platformer.Core.Logger.LogCategory.General, "StealthDebugReporter requires a CharacterStats component.", this);
+                enabled = false;
+            }
+        }
+
+        private void OnEnable()
+        {
+            if (_stats == null) return;
+            
+            _stats.OnGrassStatusChanged += HandleGrassStatusChanged;
+            _stats.OnRevealStatusChanged += HandleRevealStatusChanged;
+            Platformer.Core.Logger.Info(Platformer.Core.Logger.LogCategory.AI, "StealthDebugReporter attached and listening.", this);
+        }
+
+        private void OnDisable()
+        {
+            if (_stats == null) return;
+
+            _stats.OnGrassStatusChanged -= HandleGrassStatusChanged;
+            _stats.OnRevealStatusChanged -= HandleRevealStatusChanged;
+        }
+
+        private void HandleGrassStatusChanged(bool isInGrass)
+        {
+            Platformer.Core.Logger.Debug(Platformer.Core.Logger.LogCategory.AI, $"EVENT: OnGrassStatusChanged | New Status: {(isInGrass ? "ENTERED GRASS" : "EXITED GRASS")}", this);
+            LogCurrentState();
+        }
+
+        private void HandleRevealStatusChanged(bool isRevealed)
+        {
+            Platformer.Core.Logger.Debug(Platformer.Core.Logger.LogCategory.AI, $"EVENT: OnRevealStatusChanged | New Status: {(isRevealed ? "REVEALED" : "HIDDEN")}", this);
+            LogCurrentState();
+        }
+
+        [ContextMenu("Log Current Stealth State")]
+        private void LogCurrentState()
+        {
+            bool isVisuallyHidden = _stats.isInGrass && !_stats.isRevealed;
+            Platformer.Core.Logger.Info(Platformer.Core.Logger.LogCategory.AI, $"STATE: isInGrass={_stats.isInGrass}, isRevealed={_stats.isRevealed} | RESULT: Should be visible? {!isVisuallyHidden}", this);
+        }
+    }
+}// File: Assets/_Project/Scripts/Utilities/LayerComplianceValidator.cs
+// Version: 1.2 (Compliant)
+// Fix: Corrected all calls to use the full namespace 'Platformer.Core.Logger' to resolve all CS0117 errors.
+
+using UnityEngine;
+
+namespace Platformer.Utilities
+{
+    [RequireComponent(typeof(Collider))]
+    public class LayerComplianceValidator : MonoBehaviour
+    {
+        private int _myLayer;
+
+        private void Start()
+        {
+            _myLayer = gameObject.layer;
+            Platformer.Core.Logger.Info(Platformer.Core.Logger.LogCategory.General, $"LayerComplianceValidator ACTIVE on layer {_myLayer} ({LayerMask.LayerToName(_myLayer)}).", this);
+        }
+
+        private void OnTriggerEnter(Collider other)
+        {
+            int otherLayer = other.gameObject.layer;
+            string myLayerName = LayerMask.LayerToName(_myLayer);
+            string otherLayerName = LayerMask.LayerToName(otherLayer);
+
+            Platformer.Core.Logger.Debug(Platformer.Core.Logger.LogCategory.General, $"Trigger detected with '{other.name}' on layer {otherLayer} ({otherLayerName}).", this);
+
+            bool canInteract = !Physics.GetIgnoreLayerCollision(_myLayer, otherLayer);
+
+            if (canInteract)
+            {
+                Platformer.Core.Logger.Info(Platformer.Core.Logger.LogCategory.General, $"VALIDATION SUCCESS: Physics matrix allows interaction between '{myLayerName}' and '{otherLayerName}'. The issue is likely not layer-related.", this);
+            }
+            else
+            {
+                Platformer.Core.Logger.Error(Platformer.Core.Logger.LogCategory.General, $"VALIDATION FAILURE: Physics Layer Collision Matrix is PREVENTING interaction between player layer '{myLayerName}' and trigger layer '{otherLayerName}'. Please update Physics settings.", this);
+            }
+        }
+    }
+}// File: Assets/_Project/Scripts/States/PlayerStateUtilities.cs
+// Fix: Explicitly specified Platformer.Core.Logger to resolve ambiguity.
+
+using UnityEngine;
+
+namespace Platformer
+{
+    public static class PlayerStateUtilities
+    {
+        public static bool ValidateStateParameters(PlayerController player, StateMachine stateMachine, string context)
+        {
+            if (player == null)
+            {
+                Platformer.Core.Logger.Error(Platformer.Core.Logger.LogCategory.StateManagement, $"[{context}] PlayerController is null!");
+                return false;
+            }
+            if (stateMachine == null)
+            {
+                Platformer.Core.Logger.Error(Platformer.Core.Logger.LogCategory.StateManagement, $"[{context}] StateMachine is null!", player);
+                return false;
+            }
+            return true;
+        }
+
+        public static void EnterGroundedState(PlayerController player, Color debugColor, string stateName)
+        {
+            player.SetDebugColor(debugColor);
+            player.Movement.JumpsRemaining = 1;
+            Platformer.Core.Logger.Debug(Platformer.Core.Logger.LogCategory.StateManagement, $"[{stateName}] Entered", player);
+        }
+
+        public static bool HandleCommonGroundedTransitions(PlayerController player, StateMachine stateMachine)
+        {
+            if (player.Scoring.CanStartScoring() && player.IsScoreButtonPressed)
+            {
+                stateMachine.ChangeState(new PlayerScoringState(player, stateMachine));
+                return true;
+            }
+
+            if (player.ConsumeAttackPress() && !player.Combat.IsAttackOnCooldown)
+            {
+                stateMachine.ChangeState(new PlayerAttackState(player, stateMachine));
+                return true;
+            }
+
+            if (player.ConsumeJumpBuffer())
+            {
+                var v = player.Movement.Velocity;
+                v.y = Mathf.Sqrt(player.Movement.initialJumpHeight * -2f * player.Movement.gravity);
+                player.Movement.Velocity = v;
+                return true; 
+            }
+            return false;
+        }
+
+        public static void HandleMovementStateTransitions(PlayerController player, StateMachine stateMachine, bool currentStateIsIdle)
+        {
+            if (currentStateIsIdle && player.MoveInput != Vector2.zero)
+            {
+                stateMachine.ChangeState(new PlayerGroundedState(player, stateMachine));
+            }
+            else if (!currentStateIsIdle && player.MoveInput == Vector2.zero)
+            {
+                stateMachine.ChangeState(new PlayerIdleState(player, stateMachine));
+            }
+        }
+
+        public static void SafeMovementTick(PlayerController player, Vector2 input)
+        {
+            if (player.Movement != null)
+            {
+                player.Movement.Tick(input);
+            }
+            else
+            {
+                Platformer.Core.Logger.Error(Platformer.Core.Logger.LogCategory.Movement, "PlayerMovement component is null in SafeMovementTick!", player);
+            }
+        }
+
+        public static Color GetAttackColor(PlayerController player, bool isEmpowered)
+        {
+            return isEmpowered ? player.empoweredAttackColor : player.attackColor;
+        }
+    }
+}using UnityEngine;
+
+namespace Platformer
+{
+    public class PlayerScoringState : State
+    {
+        private float _scoringTimer;
+
+        public PlayerScoringState(PlayerController player, StateMachine stateMachine) : base(player, stateMachine) {}
+
+        public override void OnEnter()
+        {
+            if (player.Scoring.CurrentGoalZone == null)
+            {
+                Platformer.Core.Logger.Warning(Platformer.Core.Logger.LogCategory.Scoring, "Entered scoring state but CurrentGoalZone is null. Returning to Idle.", player);
+                stateMachine.ChangeState(new PlayerIdleState(player, stateMachine));
+                return;
+            }
+            _scoringTimer = player.Scoring.CoinCount * player.Scoring.CurrentGoalZone.timePerCoin;
+            player.SetScoringVisual(true);
+            player.SetDebugColor(Color.white);
+            Platformer.Core.Logger.Debug(Platformer.Core.Logger.LogCategory.StateManagement, "[PlayerScoringState] Entered", player);
+        }
+
+        public override void Update()
+        {
+            _scoringTimer -= Time.deltaTime;
+
+            if (_scoringTimer <= 0f)
+            {
+                bool scoringSucceeded = player.Scoring.ScorePoints();
+                if (scoringSucceeded)
+                {
+                    Platformer.Core.Logger.Info(Platformer.Core.Logger.LogCategory.Scoring, "Scoring completed successfully!", player);
+                }
+                stateMachine.ChangeState(new PlayerIdleState(player, stateMachine));
+                return;
+            }
+
+            if (!player.IsScoreButtonPressed || player.MoveInput != Vector2.zero)
+            {
+                Platformer.Core.Logger.Debug(Platformer.Core.Logger.LogCategory.Scoring, "Scoring cancelled by player action.", player);
+                stateMachine.ChangeState(new PlayerIdleState(player, stateMachine));
+                return;
+            }
+        }
+
+        public override void OnExit()
+        {
+            player.SetScoringVisual(false);
+            Platformer.Core.Logger.Debug(Platformer.Core.Logger.LogCategory.StateManagement, "[PlayerScoringState] Exited", player);
+        }
+    }
+}
+// File: Assets/_Project/Scripts/States/Player States/PlayerIdleState.cs
+// Version: 2.0 (Fully Refactored)
+
+using UnityEngine;
+
+namespace Platformer
+{
+    public class PlayerIdleState : PlayerBaseState
+    {
+        public PlayerIdleState(PlayerController player, StateMachine stateMachine) : base(player, stateMachine) {}
+
+        public override void OnEnter()
+        {
+            player.SetDebugColor(player.idleColor);
+            player.Movement.JumpsRemaining = 1;
+        }
+
+        public override void Update(Vector2 moveInput)
+        {
+            if (player.ConsumeJumpBuffer() && player.Movement.IsGrounded)
+            {
+                var v = player.Movement.Velocity;
+                v.y = Mathf.Sqrt(player.Movement.initialJumpHeight * -2f * player.Movement.gravity);
+                player.Movement.Velocity = v;
+            }
+            
+            if (moveInput != Vector2.zero)
+            {
+                stateMachine.SetState(new PlayerGroundedState(player, stateMachine));
+            }
+        }
+        
+        public override void FixedUpdate()
+        {
+            player.Movement.Tick(Vector2.zero);
+        }
+    }
+}// File: Assets/_Project/Scripts/States/Player States/PlayerGroundedState.cs
+// Version: 2.0 (Fully Refactored)
+
+using UnityEngine;
+
+namespace Platformer
+{
+    public class PlayerGroundedState : PlayerBaseState
+    {
+        public PlayerGroundedState(PlayerController player, StateMachine stateMachine) : base(player, stateMachine) {}
+
+        public override void OnEnter()
+        {
+            player.SetDebugColor(player.groundedColor);
+            player.Movement.JumpsRemaining = 1;
+        }
+
+        public override void Update(Vector2 moveInput)
+        {
+            if (player.ConsumeJumpBuffer() && player.Movement.IsGrounded)
+            {
+                var v = player.Movement.Velocity;
+                v.y = Mathf.Sqrt(player.Movement.initialJumpHeight * -2f * player.Movement.gravity);
+                player.Movement.Velocity = v;
+            }
+
+            if (moveInput == Vector2.zero)
+            {
+                stateMachine.SetState(new PlayerIdleState(player, stateMachine));
+            }
+        }
+
+        public override void FixedUpdate()
+        {
+            player.Movement.Tick(player.MoveInput);
+        }
+    }
+}// File: Assets/_Project/Scripts/States/Player States/PlayerBaseState.cs
+// Version: 2.0 (Fully Refactored)
+
+using UnityEngine;
+using Platformer.Core;
+
+namespace Platformer
+{
+    public interface IState
+    {
+        void OnEnter();
+        void Update(Vector2 moveInput);
+        void FixedUpdate();
+        void OnExit();
+    }
+
+    public abstract class PlayerBaseState : IState
+    {
+        protected readonly PlayerController player;
+        protected readonly StateMachine stateMachine;
+
+        protected PlayerBaseState(PlayerController player, StateMachine stateMachine)
+        {
+            this.player = player;
+            this.stateMachine = stateMachine;
+        }
+
+        public virtual void OnEnter() { }
+        public virtual void Update(Vector2 moveInput) { }
+        public virtual void FixedUpdate() { }
+        public virtual void OnExit() { }
+    }
+}// File: Assets/_Project/Scripts/States/PlayerAttackState.cs
+// Fix: Explicitly specified Platformer.Core.Logger to resolve ambiguity.
+
+using UnityEngine;
+
+namespace Platformer
+{
+    public class PlayerAttackState : State
+    {
+        private float _attackDuration = 0.5f;
+        private float _timer;
+        
+        public PlayerAttackState(PlayerController player, StateMachine stateMachine) : base(player, stateMachine) {}
+
+        public override void OnEnter()
+        {
+            if (!PlayerStateUtilities.ValidateStateParameters(player, stateMachine, "PlayerAttackState.OnEnter")) return;
+
+            player.Combat.ExecuteAttack();
+            _timer = _attackDuration;
+            
+            bool isEmpowered = player.MyStats.IsNextAttackEmpowered();
+            Color attackColor = PlayerStateUtilities.GetAttackColor(player, isEmpowered);
+            player.SetDebugColor(attackColor);
+            
+            Platformer.Core.Logger.Debug(Platformer.Core.Logger.LogCategory.Combat, $"Attack state entered - {(isEmpowered ? "Empowered" : "Normal")} attack", player);
+        }
+
+        public override void Update()
+        {
+            if (!PlayerStateUtilities.ValidateStateParameters(player, stateMachine, "PlayerAttackState.Update")) return;
+
+            _timer -= Time.deltaTime;
+            if (_timer <= 0f)
+            {
+                Platformer.Core.Logger.Debug(Platformer.Core.Logger.LogCategory.Combat, "Attack completed, returning to idle", player);
+                stateMachine.ChangeState(new PlayerIdleState(player, stateMachine));
+            }
+        }
+
+        public override void FixedUpdate()
+        {
+            float currentMultiplier = Mathf.Lerp(player.Combat.attackMoveSpeedMultiplier, 1f, 1f - (_timer / _attackDuration));
+            Vector2 modifiedInput = player.MoveInput * currentMultiplier;
+            PlayerStateUtilities.SafeMovementTick(player, modifiedInput);
+        }
+    }
+}// File: Assets/_Project/Scripts/States/PlayerAirborneState.cs
+// Fix: Explicitly specified Platformer.Core.Logger to resolve ambiguity.
+
+using UnityEngine;
+
+namespace Platformer
+{
+    public class PlayerAirborneState : State
+    {
+        private float _jumpHoldTimer;
+        
+        public PlayerAirborneState(PlayerController player, StateMachine stateMachine) : base(player, stateMachine) {}
+
+        public override void OnEnter()
+        {
+            _jumpHoldTimer = player.Movement.jumpHoldDuration;
+            player.SetDebugColor(player.airborneColor);
+            Platformer.Core.Logger.Debug(Platformer.Core.Logger.LogCategory.StateManagement, "[PlayerAirborneState] Entered", player);
+        }
+
+        public override void Update()
+        {
+            if (player.ConsumeAttackPress() && !player.Combat.IsAttackOnCooldown)
+            {
+                stateMachine.ChangeState(new PlayerAttackState(player, stateMachine));
+                return;
+            }
+
+            if (player.ConsumeJumpBuffer() && player.Movement.JumpsRemaining > 0)
+            {
+                player.Movement.JumpsRemaining--;
+                var v = player.Movement.Velocity;
+                v.y = player.Movement.doubleJumpBoostVelocity;
+                player.Movement.Velocity = v;
+                player.SetDebugColor(player.doubleJumpColor);
+                Platformer.Core.Logger.Debug(Platformer.Core.Logger.LogCategory.Movement, "Double Jump!", player);
+            }
+            else if (player.Movement.Velocity.y > 0 && player.IsJumpButtonPressed && _jumpHoldTimer > 0)
+            {
+                var v = player.Movement.Velocity;
+                v.y += player.Movement.gravity * (1f - player.Movement.jumpCutOffMultiplier) * Time.deltaTime;
+                player.Movement.Velocity = v;
+                _jumpHoldTimer -= Time.deltaTime;
+                player.SetDebugColor(player.highJumpColor);
+            }
+            else
+            {
+                if (!player.IsJumpButtonPressed && player.Movement.Velocity.y > 0)
+                {
+                    var v = player.Movement.Velocity;
+                    v.y += player.Movement.gravity * player.Movement.jumpCutOffMultiplier * Time.deltaTime;
+                    player.Movement.Velocity = v;
+                }
+            }
+        }
+
+        public override void FixedUpdate()
+        {
+            PlayerStateUtilities.SafeMovementTick(player, player.MoveInput);
+        }
+
+        public override void OnExit()
+        {
+            Platformer.Core.Logger.Debug(Platformer.Core.Logger.LogCategory.StateManagement, "[PlayerAirborneState] Exited", player);
+        }
+    }
+}// File: Assets/_Project/Scripts/States/Enemy States/EnemyBaseState.cs
+// This file is correct and included for completeness.
+
+using UnityEngine;
+using Photon.Pun;
+
+namespace Platformer
+{
+    public abstract class EnemyBaseState : IState
+    {
+        protected readonly EnemyAIController enemy;
+        protected EnemyBaseState(EnemyAIController enemy) { this.enemy = enemy; }
+        public virtual void OnEnter() { }
+        public virtual void Update() { }
+        public virtual void FixedUpdate() { }
+        public virtual void OnExit() { }
+    }
+
+    public class EnemyIdleState : EnemyBaseState
+    {
+        public EnemyIdleState(EnemyAIController enemy) : base(enemy) { }
+        public override void OnEnter()
+        {
+            enemy.SetStateColor(enemy.idleColor);
+            if (enemy.Agent.isOnNavMesh) enemy.Agent.isStopped = true;
+            enemy.LoseAggro();
+        }
+    }
+    
+    public class EnemyCombatState : EnemyBaseState
+    {
+        private float _attackCooldown;
+        private float _attackTimer;
+
+        public EnemyCombatState(EnemyAIController enemy) : base(enemy) { }
+
+        public override void OnEnter()
+        {
+            enemy.SetStateColor(enemy.combatColor);
+            _attackCooldown = 1f / enemy.MyStats.baseStats.AttackSpeed;
+            if (enemy.Agent.isOnNavMesh)
+            {
+                enemy.Agent.isStopped = false;
+                enemy.Agent.stoppingDistance = enemy.attackRadius * 0.8f;
+            }
+            _attackTimer = 0;
+        }
+
+        public override void Update()
+        {
+            if (enemy.PlayerTarget != null && enemy.Agent.isOnNavMesh)
+            {
+                enemy.Agent.SetDestination(enemy.PlayerTarget.position);
+            }
+
+            _attackTimer -= Time.deltaTime;
+            if (_attackTimer <= 0 && enemy.IsPlayerInRadius(enemy.attackRadius))
+            {
+                Attack();
+                _attackTimer = _attackCooldown;
+            }
+        }
+
+        private void Attack()
+        {
+            if (!PhotonNetwork.IsMasterClient) return;
+
+            CharacterStats playerStats = enemy.PlayerTarget.GetComponent<CharacterStats>();
+            if (playerStats == null) return;
+
+            bool isEmpowered = enemy.MyStats.IsNextAttackEmpowered();
+            enemy.SetStateColor(isEmpowered ? enemy.empoweredAttackColor : enemy.combatColor);
+
+            Collider[] hits = Physics.OverlapSphere(enemy.transform.position, enemy.attackRadius, enemy.targetLayerMask);
+            foreach (var hit in hits)
+            {
+                if (hit.TryGetComponent<Hurtbox>(out var hurtbox) && hurtbox.statsController == playerStats)
+                {
+                    int damage = CombatCalculator.CalculateDamage(enemy.MyStats, playerStats, isEmpowered);
+                    
+                    PhotonView playerView = playerStats.GetComponent<PhotonView>();
+                    if(playerView != null)
+                    {
+                        playerView.RPC("Rpc_TakeDamage", RpcTarget.All, damage, enemy.GetComponent<PhotonView>().ViewID);
+                    }
+                    break;
+                }
+            }
+            enemy.MyStats.RegisterAttack();
+        }
+
+        public override void OnExit()
+        {
+            if (enemy.Agent.isOnNavMesh)
+            {
+                enemy.Agent.ResetPath();
+            }
+        }
+    }
+
+    public class EnemyReturnState : EnemyBaseState
+    {
+        public EnemyReturnState(EnemyAIController enemy) : base(enemy) { }
+        public override void OnEnter()
+        {
+            enemy.LoseAggro();
+            enemy.SetStateColor(enemy.returnColor);
+            if (enemy.Agent.isOnNavMesh)
+            {
+                enemy.Agent.isStopped = false;
+                enemy.Agent.SetDestination(enemy.StartPosition);
+            }
+        }
+    }
+}// StateInterfaces.cs (v1.1 - No changes from v1.0)
+// This file can be named "StateInterfaces.cs" or similar.
+// It contains the core contracts for the state machine system.
+
+namespace Platformer
+{
+    /// <summary>
+    /// Defines the contract for a state. Any class that is a state
+    /// must implement these methods.
+    /// </summary>
+    public interface IState
+    {
+        void OnEnter();   // Called once when the state is first entered.
+        void Update();    // Called every frame via MonoBehaviour.Update().
+        void FixedUpdate(); // Called every physics step via MonoBehaviour.FixedUpdate().
+        void OnExit();    // Called once when the state is exited.
+    }
+
+    /// <summary>
+    /// Defines the contract for a predicate, which is a condition
+    /// used to decide if a state transition should occur.
+    /// </summary>
+    public interface IPredicate
+    {
+        bool Evaluate(); // Returns true if the condition is met, false otherwise.
+    }
+
+    /// <summary>
+    /// Defines the contract for a transition, which connects two states.
+    /// </summary>
+    public interface ITransition
+    {
+        IState To { get; }         // The state to transition to.
+        IPredicate Condition { get; } // The condition that must be met to transition.
+    }
+}// StateImplementations.cs (v1.1 - No changes from v1.0)
+// This file can be named "StateImplementations.cs" or similar.
+// It contains the concrete classes that implement the state machine contracts.
+
+using System;
+
+namespace Platformer
+{
+    /// <summary>
+    /// A basic wrapper to evaluate inline conditions (lambda expressions).
+    /// This allows you to define transition conditions without creating a new class for each one.
+    /// </summary>
+    public class FunkPredicate : IPredicate
+    {
+        private readonly Func<bool> _condition;
+
+        public FunkPredicate(Func<bool> condition)
+        {
+            _condition = condition;
+        }
+
+        public bool Evaluate() => _condition();
+    }
+
+    /// <summary>
+    /// Represents a state transition, holding a target state and its condition.
+    /// </summary>
+    public class Transition : ITransition
+    {
+        public IState To { get; }
+        public IPredicate Condition { get; }
+
+        public Transition(IState to, IPredicate condition)
+        {
+            To = to;
+            Condition = condition;
+        }
+    }
+}// File: Assets/_Project/Scripts/Core/GameStateManager.cs
+// Version: 2.0 (Architecturally Compliant)
+// Status: APPROVED
+
+using UnityEngine;
+using Photon.Pun;
+using System;
+
+namespace Platformer
+{
+    [RequireComponent(typeof(PhotonView))]
+    public class GameStateManager : MonoBehaviourPunCallbacks, IPunObservable
+    {
+        private static GameStateManager _instance;
+        private const string PREFAB_PATH = "Systems/GameStateManager";
+
+        public static GameStateManager Instance
+        {
+            get
+            {
+                if (_instance == null)
+                {
+                    var prefab = Resources.Load<GameStateManager>(PREFAB_PATH);
+                    if (prefab == null)
+                    {
+                        Core.Logger.Critical(Core.Logger.LogCategory.Networking, $"CRITICAL: GameStateManager prefab not found at path: Resources/{PREFAB_PATH}");
+                        return null;
+                    }
+                    // Instantiate with a null parent to guarantee it's a root object, resolving the DontDestroyOnLoad warning.
+                    _instance = Instantiate(prefab, null);
+                }
+                return _instance;
+            }
+        }
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetStaticInstance()
+        {
+            _instance = null;
+        }
+
+        public enum GameState { Pregame, Running, FinalStretch, Postgame }
+
+        [Header("Game State")]
+        public GameState CurrentState { get; private set; }
+        public float MatchTimeRemaining { get; private set; } = 300f;
+
+        [Header("Team Scores")]
+        public int HomeTeamScore { get; private set; }
+        public int AwayTeamScore { get; private set; }
+
+        public static event Action<GameState> OnGameStateChanged;
+        public static event Action<float> OnTimerUpdated;
+        public static event Action<int, int> OnScoreUpdated;
+
+        private const float FINAL_STRETCH_TIME = 60f;
+
+        private void Awake()
+        {
+            if (_instance != null && _instance != this)
+            {
+                Destroy(this.gameObject);
+                return;
+            }
+            _instance = this;
+            DontDestroyOnLoad(this.gameObject);
+        }
+
+        public override void OnJoinedRoom()
+        {
+            if (PhotonNetwork.IsMasterClient)
+            {
+                SetGameState(GameState.Pregame);
+                Invoke(nameof(StartGame), 5f);
+            }
+        }
+
+        private void StartGame()
+        {
+            if (!PhotonNetwork.IsMasterClient) return;
+            SetGameState(GameState.Running);
+        }
+
+        private void Update()
+        {
+            if (!PhotonNetwork.IsMasterClient) return;
+            if (CurrentState != GameState.Running && CurrentState != GameState.FinalStretch) return;
+
+            MatchTimeRemaining -= Time.deltaTime;
+
+            if (CurrentState == GameState.Running && MatchTimeRemaining <= FINAL_STRETCH_TIME)
+            {
+                SetGameState(GameState.FinalStretch);
+            }
+
+            if (MatchTimeRemaining <= 0)
+            {
+                MatchTimeRemaining = 0;
+                SetGameState(GameState.Postgame);
+            }
+        }
+
+        public void AddScore(Platformer.Team team, int points)
+        {
+            if (PhotonNetwork.InRoom)
+            {
+                photonView.RPC(nameof(Rpc_UpdateScore), RpcTarget.All, team, points);
+            }
+            else
+            {
+                Rpc_UpdateScore(team, points);
+            }
+        }
+
+        [PunRPC]
+        private void Rpc_UpdateScore(Platformer.Team team, int points)
+        {
+            if (team == Platformer.Team.Home) HomeTeamScore += points;
+            else if (team == Platformer.Team.Away) AwayTeamScore += points;
+            OnScoreUpdated?.Invoke(HomeTeamScore, AwayTeamScore);
+        }
+
+        private void SetGameState(GameState newState)
+        {
+            if (CurrentState == newState) return;
+
+            if (PhotonNetwork.InRoom)
+            {
+                photonView.RPC(nameof(Rpc_SetGameState), RpcTarget.All, newState);
+            }
+            else
+            {
+                Rpc_SetGameState(newState);
+            }
+        }
+
+        [PunRPC]
+        private void Rpc_SetGameState(GameState newState)
+        {
+            CurrentState = newState;
+            OnGameStateChanged?.Invoke(CurrentState);
+        }
+
+        public void OnPhotonSerializeView(PhotonStream stream, PhotonMessageInfo info)
+        {
+            if (stream.IsWriting)
+            {
+                stream.SendNext(MatchTimeRemaining);
+            }
+            else
+            {
+                this.MatchTimeRemaining = (float)stream.ReceiveNext();
+                OnTimerUpdated?.Invoke(this.MatchTimeRemaining);
+            }
+        }
+    }
+}// File: Assets/_Project/Scripts/Networking/NetworkOptimizer.cs
+// Fix: Moved all static field initializations into a method with the
+// [RuntimeInitializeOnLoadMethod] attribute to resolve all UDR0002 warnings
+// and ensure stability between play sessions in the Unity Editor.
+
+using UnityEngine;
+using Photon.Pun;
+using System.Collections.Generic;
+using System.Collections;
+
+namespace Platformer.Networking
+{
+    public static class NetworkOptimizer
+    {
+        // Fields are now declared without initial values.
+        private static Dictionary<string, float> _lastRpcTimes;
+        private static Queue<System.Action> _batchedOperations;
+        private static bool _isBatchProcessing;
+        
+        public const float MIN_RPC_INTERVAL = 0.1f;
+
+        // This method is now the single source of truth for initializing static fields.
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void InitializeOnLoad()
+        {
+            _lastRpcTimes = new Dictionary<string, float>();
+            _batchedOperations = new Queue<System.Action>();
+            _isBatchProcessing = false;
+            Platformer.Core.Logger.Info(Platformer.Core.Logger.LogCategory.Networking, "NetworkOptimizer static fields reset.");
+        }
+        
+        public static void BatchOperation(System.Action operation)
+        {
+            if (operation == null) return;
+            
+            _batchedOperations.Enqueue(operation);
+            
+            if (!_isBatchProcessing)
+            {
+                CoroutineRunner.Instance.StartCoroutine(ProcessBatch());
+            }
+        }
+        
+        private static IEnumerator ProcessBatch()
+        {
+            _isBatchProcessing = true;
+            yield return null; 
+            
+            while (_batchedOperations.Count > 0)
+            {
+                try
+                {
+                    var operation = _batchedOperations.Dequeue();
+                    operation?.Invoke();
+                }
+                catch (System.Exception ex)
+                {
+                    Platformer.Core.Logger.Exception(Platformer.Core.Logger.LogCategory.Networking, ex, "Exception in batched operation");
+                }
+                yield return null;
+            }
+            
+            _isBatchProcessing = false;
+        }
+    }
+    
+    public class CoroutineRunner : MonoBehaviour
+    {
+        private static CoroutineRunner _instance;
+        
+        public static CoroutineRunner Instance
+        {
+            get
+            {
+                if (_instance == null)
+                {
+                    var go = new GameObject("NetworkOptimizer_CoroutineRunner");
+                    _instance = go.AddComponent<CoroutineRunner>();
+                    DontDestroyOnLoad(go);
+                }
+                return _instance;
+            }
+        }
+        
+        // This ensures the static instance is reset between play sessions in the editor.
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        public static void ResetStatics()
+        {
+            _instance = null;
+        }
+    }
+}// File: Assets/_Project/Scripts/Networking/ConnectionManager.cs
+// This script handles all Photon PUN 2 network connections, room joining,
+// and connection callbacks. It adheres to the project's namespace and
+// logging standards.
+
+using UnityEngine;
+using Photon.Pun;
+using Photon.Realtime;
+
+// The script is placed in the correct namespace for organization.
+namespace Platformer.Networking
+{
+    public class ConnectionManager : MonoBehaviourPunCallbacks
+    {
+        private GameManager _gameManager;
+
+        void Awake()
+        {
+            try
+            {
+                _gameManager = FindFirstObjectByType<GameManager>();
+                if (_gameManager == null)
+                {
+                    // Using the project's standardized logger for consistency.
+                    Platformer.Core.Logger.Error(Platformer.Core.Logger.LogCategory.Networking, "GameManager not found in scene! ConnectionManager cannot spawn player.", this);
+                }
+            }
+            catch (System.Exception ex)
+            {
+                Platformer.Core.Logger.Exception(Platformer.Core.Logger.LogCategory.Networking, ex, "Exception in Awake", this);
+            }
+        }
+
+        /// <summary>
+        /// Initiates connection to Photon Master Server if not already connected.
+        /// </summary>
+        public void Connect()
+        {
+            try
+            {
+                if (!PhotonNetwork.IsConnected)
+                {
+                    PhotonNetwork.AutomaticallySyncScene = true;
+                    Platformer.Core.Logger.Info(Platformer.Core.Logger.LogCategory.Networking, "Connecting to Photon...");
+                    PhotonNetwork.ConnectUsingSettings();
+                }
+                else
+                {
+                    Platformer.Core.Logger.Info(Platformer.Core.Logger.LogCategory.Networking, "Already connected to Photon.");
+                }
+            }
+            catch (System.Exception ex)
+            {
+                Platformer.Core.Logger.Exception(Platformer.Core.Logger.LogCategory.Networking, ex, "Exception in Connect", this);
+            }
+        }
+
+        public override void OnConnectedToMaster()
+        {
+            Platformer.Core.Logger.Info(Platformer.Core.Logger.LogCategory.Networking, "Connected to Master Server! Joining a random room...");
+            PhotonNetwork.JoinRandomRoom();
+        }
+
+        public override void OnJoinRandomFailed(short returnCode, string message)
+        {
+            Platformer.Core.Logger.Warning(Platformer.Core.Logger.LogCategory.Networking, $"Failed to join a random room (Code: {returnCode}): {message}. Creating a new room...");
+            PhotonNetwork.CreateRoom(null, new RoomOptions { MaxPlayers = 4 });
+        }
+
+        public override void OnJoinedRoom()
+        {
+            Platformer.Core.Logger.Info(Platformer.Core.Logger.LogCategory.Networking, $"Successfully joined room: {PhotonNetwork.CurrentRoom.Name}");
+            
+            if (_gameManager == null)
+            {
+                Platformer.Core.Logger.Error(Platformer.Core.Logger.LogCategory.Networking, "GameManager reference is null! Cannot spawn networked player.", this);
+                return;
+            }
+            
+            _gameManager.SpawnNetworkedPlayer();
+        }
+    }
+}// File: Assets/_Project/Scripts/Interactables/StealthGrass.cs
+// Version: 1.1 (Syntactically Correct)
+// Fix: Removed invalid 'public' access modifiers from Unity message functions.
+
+using UnityEngine;
+
+namespace Platformer
+{
+    [RequireComponent(typeof(Collider))]
+    public class StealthGrass : MonoBehaviour
+    {
+        private void Awake()
+        {
+            // Ensure the collider is a trigger, as this script will not function otherwise.
+            var col = GetComponent<Collider>();
+            if (!col.isTrigger)
+            {
+                Platformer.Core.Logger.Warning(Platformer.Core.Logger.LogCategory.General, $"Collider on {name} is not set to 'Is Trigger'. Stealth system will not work.", this);
+            }
+        }
+
+        // CORRECT: No access modifier (private by default, which is valid).
+        void OnTriggerEnter(Collider other)
+        {
+            if (other.TryGetComponent<CharacterStats>(out var stats))
+            {
+                stats.SetInGrassStatus(true);
+            }
+        }
+
+        // CORRECT: No access modifier.
+        void OnTriggerExit(Collider other)
+        {
+            if (other.TryGetComponent<CharacterStats>(out var stats))
+            {
+                stats.SetInGrassStatus(false);
+            }
+        }
+    }
+}using UnityEngine;
+using Photon.Pun; // **NEW**: Added for PUN 2 functionality
+
+namespace Platformer
+{
+    public class Projectile : MonoBehaviour
+    {
+        [SerializeField] private float speed = 15f;
+        [SerializeField] private float lifetime = 3f;
+
+        private int _damage;
+        private CharacterStats _owner;
+        private bool _isEmpowered;
+        private LayerMask _targetLayerMask;
+        private PhotonView _photonView;
+
+        private void Awake()
+        {
+            _photonView = GetComponent<PhotonView>();
+        }
+
+        public void Initialize(CharacterStats owner, int damage, bool isEmpowered, LayerMask targetLayerMask)
+        {
+            _owner = owner;
+            _damage = damage;
+            _isEmpowered = isEmpowered;
+            _targetLayerMask = targetLayerMask;
+            
+            // Only the master client should manage the lifetime destruction to prevent conflicts
+            if(PhotonNetwork.IsMasterClient)
+            {
+                Destroy(gameObject, lifetime);
+            }
+        }
+
+        private void Update()
+        {
+            transform.Translate(Vector3.forward * speed * Time.deltaTime);
+        }
+
+        private void OnTriggerEnter(Collider other)
+        {
+            // The projectile's logic should only be executed by the master client to ensure authoritative hit detection.
+            if (!PhotonNetwork.IsMasterClient) return;
+
+            if ((_targetLayerMask.value & (1 << other.gameObject.layer)) > 0)
+            {
+                if (other.TryGetComponent<Hurtbox>(out var hurtbox))
+                {
+                    if (hurtbox.statsController != _owner && hurtbox.statsController.team != _owner.team)
+                    {
+                        Debug.Log($"{_owner.name}'s projectile hit {hurtbox.statsController.name}!");
+                        
+                        // **REFACTORED** with null check protection
+                        PhotonView targetView = hurtbox.statsController.GetComponent<PhotonView>();
+                        PhotonView ownerView = _owner.GetComponent<PhotonView>();
+                        if(targetView != null && ownerView != null)
+                        {
+                            targetView.RPC("Rpc_TakeDamage", RpcTarget.All, _damage, ownerView.ViewID);
+                        }
+                        
+                        PhotonNetwork.Destroy(gameObject); // Use PhotonNetwork.Destroy for networked objects
+                    }
+                }
+            }
+        }
+    }
+}// File: Assets/_Project/Scripts/Interactables/PooledProjectile.cs
+// Fix: Wrapped damage RPC call in a network-aware check.
+
+using UnityEngine;
+using Photon.Pun;
+using System.Collections;
+
+namespace Platformer
+{
+    public class PooledProjectile : MonoBehaviour, Core.IPoolable
+    {
+        // ... (Fields are unchanged) ...
+        [SerializeField] private float speed = 15f;
+        [SerializeField] private float lifetime = 3f;
+        private int _damage;
+        private CharacterStats _owner;
+        private LayerMask _targetLayerMask;
+        private Coroutine _lifetimeCoroutine;
+        private Vector3 _direction;
+
+        // ... (Initialize, Update, LifetimeCountdown methods are unchanged) ...
+        public void Initialize(CharacterStats owner, int damage, bool isEmpowered, LayerMask targetLayerMask, Vector3 direction)
+        {
+            _owner = owner;
+            _damage = damage;
+            _targetLayerMask = targetLayerMask;
+            _direction = direction.normalized;
+            transform.rotation = Quaternion.LookRotation(_direction);
+
+            if (_lifetimeCoroutine != null) StopCoroutine(_lifetimeCoroutine);
+            _lifetimeCoroutine = StartCoroutine(LifetimeCountdown());
+            Platformer.Core.Logger.Debug(Platformer.Core.Logger.LogCategory.Combat, $"Projectile initialized - Damage: {damage}, Empowered: {isEmpowered}", this);
+        }
+
+        private void Update()
+        {
+            transform.Translate(_direction * speed * Time.deltaTime, Space.World);
+        }
+
+        private IEnumerator LifetimeCountdown()
+        {
+            yield return new WaitForSeconds(lifetime);
+            ReturnToPool();
+        }
+
+
+        private void OnTriggerEnter(Collider other)
+        {
+            if (PhotonNetwork.InRoom && !PhotonNetwork.IsMasterClient) return;
+
+            if ((_targetLayerMask.value & (1 << other.gameObject.layer)) > 0)
+            {
+                if (other.TryGetComponent<Hurtbox>(out var hurtbox))
+                {
+                    if (hurtbox.statsController != _owner && hurtbox.statsController.team != _owner.team)
+                    {
+                        PhotonView targetView = hurtbox.statsController.GetComponent<PhotonView>();
+                        PhotonView ownerView = _owner.GetComponent<PhotonView>();
+                        
+                        if (targetView != null && ownerView != null)
+                        {
+                            // THE FIX IS HERE
+                            if (PhotonNetwork.InRoom)
+                            {
+                                targetView.RPC("Rpc_TakeDamage", RpcTarget.All, _damage, ownerView.ViewID);
+                            }
+                            else
+                            {
+                                hurtbox.statsController.Rpc_TakeDamage(_damage, ownerView.ViewID);
+                            }
+                        }
+                        
+                        ReturnToPool();
+                    }
+                }
+            }
+        }
+        
+        // ... (ReturnToPool and IPoolable methods are unchanged) ...
+        private void ReturnToPool()
+        {
+            if (Core.PoolManager.Instance != null) { Core.PoolManager.Instance.ReturnProjectile(this); }
+            else { Destroy(gameObject); }
+        }
+
+        public void OnPoolGet() { }
+        public void OnPoolReturn()
+        {
+            if (_lifetimeCoroutine != null) { StopCoroutine(_lifetimeCoroutine); _lifetimeCoroutine = null; }
+            _owner = null;
+        }
+    }
+}// File: Assets/_Project/Scripts/Interactables/PooledCoin.cs
+// Fix: Explicitly specified Platformer.Core.Logger to resolve ambiguity.
+
+using UnityEngine;
+using System.Collections;
+
+namespace Platformer
+{
+    public class PooledCoin : MonoBehaviour, Core.IPoolable
+    {
+        public float spinSpeed = 90f;
+        public int coinValue = 1;
+        public float despawnTime = 30f;
+        
+        private Coroutine _despawnCoroutine;
+        
+        public void Initialize(int value, Vector3 position, float despawnDelay = 30f)
+        {
+            coinValue = value;
+            transform.position = position;
+            
+            if (despawnDelay > 0)
+            {
+                if (_despawnCoroutine != null) StopCoroutine(_despawnCoroutine);
+                _despawnCoroutine = StartCoroutine(DespawnTimer(despawnDelay));
+            }
+            
+            Platformer.Core.Logger.Debug(Platformer.Core.Logger.LogCategory.Scoring, $"Coin initialized with value {value} at {position}", this);
+        }
+        
+        private void Update()
+        {
+            transform.Rotate(Vector3.up, spinSpeed * Time.deltaTime);
+        }
+        
+        private IEnumerator DespawnTimer(float delay)
+        {
+            yield return new WaitForSeconds(delay);
+            Platformer.Core.Logger.Debug(Platformer.Core.Logger.LogCategory.Scoring, "Coin despawned due to timeout", this);
+            ReturnToPool();
+        }
+        
+        public void Collect()
+        {
+            Platformer.Core.Logger.Debug(Platformer.Core.Logger.LogCategory.Scoring, $"Coin collected for {coinValue} points", this);
+            ReturnToPool();
+        }
+        
+        private void ReturnToPool()
+        {
+            if (Core.PoolManager.Instance != null)
+            {
+                Core.PoolManager.Instance.ReturnCoin(this);
+            }
+            else
+            {
+                Platformer.Core.Logger.Warning(Platformer.Core.Logger.LogCategory.Performance, "No PoolManager found, destroying coin", this);
+                Destroy(gameObject);
+            }
+        }
+
+        public void OnPoolGet()
+        {
+            Platformer.Core.Logger.Verbose(Platformer.Core.Logger.LogCategory.Performance, "Coin retrieved from pool", this);
+        }
+
+        public void OnPoolReturn()
+        {
+            if (_despawnCoroutine != null)
+            {
+                StopCoroutine(_despawnCoroutine);
+                _despawnCoroutine = null;
+            }
+            Platformer.Core.Logger.Verbose(Platformer.Core.Logger.LogCategory.Performance, "Coin returned to pool", this);
+        }
+    }
+}// File: Assets/_Project/Scripts/Interactables/GoalZone.cs
+// Version: 1.2 (Corrected)
+// Fix: Changed ScorePoints method return type from 'void' to 'int' to resolve CS0029.
+
+using UnityEngine;
+using Photon.Pun;
+using System.Collections;
+
+namespace Platformer
+{
+    [RequireComponent(typeof(Collider))]
+    public class GoalZone : MonoBehaviour
+    {
+        [Header("Settings")]
+        public Team team;
+        public int scoreCapacity = 100;
+        public float timePerCoin = 0.1f;
+        public float healPerSecond = 10f;
+
+        private bool _isBroken = false;
+        private Coroutine _healingCoroutine;
+
+        public int ScorePoints(int pointsToScore)
+        {
+            if (_isBroken) return 0;
+
+            int pointsActuallyScored = Mathf.Min(pointsToScore, scoreCapacity);
+            scoreCapacity -= pointsActuallyScored;
+
+            if (scoreCapacity <= 0)
+            {
+                scoreCapacity = 0;
+                BreakGoal();
+            }
+            
+            return pointsActuallyScored;
+        }
+        
+        public void BreakGoal()
+        {
+            if (_isBroken) return;
+            
+            if (PhotonNetwork.InRoom)
+            {
+                GetComponent<PhotonView>().RPC(nameof(Rpc_BreakGoal), RpcTarget.All);
+            }
+            else
+            {
+                Rpc_BreakGoal();
+            }
+        }
+
+        [PunRPC]
+        private void Rpc_BreakGoal()
+        {
+            _isBroken = true;
+            Core.Logger.Info(Core.Logger.LogCategory.Scoring, $"Goal Zone {name} has been broken!", this);
+        }
+
+        #region Player Healing
+        public void StartHealingPlayer(PlayerController player)
+        {
+            if (player.MyStats.team == this.team)
+            {
+                _healingCoroutine = StartCoroutine(HealPlayer(player.MyStats));
+            }
+        }
+
+        public void StopHealingPlayer()
+        {
+            if (_healingCoroutine != null)
+            {
+                StopCoroutine(_healingCoroutine);
+                _healingCoroutine = null;
+            }
+        }
+
+        private IEnumerator HealPlayer(CharacterStats statsToHeal)
+        {
+            while (statsToHeal != null && statsToHeal.currentHealth < statsToHeal.baseStats.HP)
+            {
+                statsToHeal.Heal(Mathf.RoundToInt(healPerSecond * Time.deltaTime));
+                yield return null;
+            }
+        }
+        #endregion
+
+        private void OnTriggerEnter(Collider other)
+        {
+            if (other.TryGetComponent<PlayerScoring>(out var scoring))
+            {
+                scoring.OnEnterGoalZone(this);
+            }
+        }
+        
+        private void OnTriggerExit(Collider other)
+        {
+            if (other.TryGetComponent<PlayerScoring>(out var scoring))
+            {
+                scoring.OnExitGoalZone(this);
+            }
+        }
+    }
+}using UnityEngine;
+
+namespace Platformer
+{
+    [RequireComponent(typeof(Collider))]
+    public class Collector : MonoBehaviour
+    {
+        private PlayerController _playerController;
+
+        private void Awake()
+        {
+            _playerController = GetComponentInParent<PlayerController>();
+            if (_playerController == null)
+            {
+                Debug.LogError("Collector could not find PlayerController in parent!", this);
+            }
+        }
+
+        private void OnTriggerEnter(Collider other)
+        {
+            if (other.TryGetComponent<Coin>(out Coin coin))
+            {
+                if (_playerController != null && _playerController.Scoring != null)
+                {
+                    // **THE FIX**: Instead of calling playerController.CollectCoin,
+                    // we now call the method on its Scoring component.
+                    _playerController.Scoring.CollectCoin(coin);
+                }
+            }
+        }
+    }
+}// Coin.cs (v1.1 - No changes from v1.0)
+using UnityEngine;
+
+namespace Platformer
+{
+    public class Coin : MonoBehaviour
+    {
+        [Tooltip("How fast the coin spins.")]
+        public float spinSpeed = 90f;
+        [Tooltip("The number of points this coin is worth.")]
+        public int coinValue = 1;
+
+        private void Update()
+        {
+            // Rotate the coin around its up axis (Y-axis) over time.
+            transform.Rotate(Vector3.up, spinSpeed * Time.deltaTime);
+        }
+
+        public void Collect()
+        {
+            // When collected, we simply destroy the coin GameObject.
+            // We can add sound effects or particles here later.
+            Destroy(gameObject);
+        }
+    }
+}// Hurtbox.cs (v1.1 - No changes from v1.0)
+using UnityEngine;
+
+namespace Platformer
+{
+    // This component's only job is to receive damage and pass it to the main stats controller.
+    public class Hurtbox : MonoBehaviour
+    {
+        // We will link this to the main EnemyAIController in the Inspector.
+        public CharacterStats statsController;
+    }
+}// File: Assets/_Project/Scripts/Enemies/EnemyAIController.cs
+// Version: 2.1 (Corrected)
+// Fix: Added the missing 'empoweredAttackColor' field to resolve CS1061.
+
+using UnityEngine;
+using UnityEngine.AI;
+using System.Collections;
+using Photon.Pun;
+
+namespace Platformer
+{
+    [RequireComponent(typeof(CharacterStats), typeof(NavMeshAgent), typeof(StateMachine))]
+    [RequireComponent(typeof(PhotonView))]
+    public class EnemyAIController : MonoBehaviour
+    {
+        [Header("AI Behavior")]
+        public bool canFollowPlayer = true;
+        public float leashRadius = 15f;
+        public float attackRadius = 2f;
+        public LayerMask targetLayerMask;
+
+        [Header("Loot")]
+        public GameObject coinPrefab;
+        public int coinDropAmount = 3;
+
+        [Header("Debug Colors")]
+        public Material debugMaterial;
+        private Material _materialInstance;
+        public Color idleColor = Color.gray;
+        public Color combatColor = Color.magenta;
+        public Color returnColor = new Color(1f, 0.5f, 0f);
+        public Color empoweredAttackColor = Color.white; // MISSING FIELD ADDED
+        
+        public CharacterStats MyStats { get; private set; }
+        public NavMeshAgent Agent { get; private set; }
+        public StateMachine StateMachine { get; private set; }
+        public Transform PlayerTarget { get; private set; }
+        public Vector3 StartPosition { get; private set; }
+        public bool IsAggroed { get; private set; }
+        private float _aggroLossTimer;
+
+        private void Awake()
+        {
+            MyStats = GetComponent<CharacterStats>();
+            Agent = GetComponent<NavMeshAgent>();
+            StateMachine = GetComponent<StateMachine>();
+            StartPosition = transform.position;
+            var renderer = GetComponentInChildren<Renderer>();
+            if (renderer != null) 
+            {
+                _materialInstance = new Material(renderer.material);
+                renderer.material = _materialInstance;
+                debugMaterial = _materialInstance;
+            }
+            
+            MyStats.OnLevelUp += HandleLevelUp;
+            MyStats.OnDied += HandleDeath;
+        }
+
+        private void Start()
+        {
+            UpdateAgentSpeed();
+            SetupStateMachine();
+        }
+
+        private void OnDestroy()
+        {
+            if (MyStats != null) 
+            {
+                MyStats.OnLevelUp -= HandleLevelUp;
+                MyStats.OnDied -= HandleDeath; 
+            }
+        }
+
+        private void SetupStateMachine()
+        {
+            var idleState = new EnemyIdleState(this);
+            var combatState = new EnemyCombatState(this);
+            var returnState = new EnemyReturnState(this);
+
+            StateMachine.AddTransition(idleState, combatState, new FunkPredicate(() => IsAggroed && ShouldChasePlayer()));
+            StateMachine.AddTransition(combatState, returnState, new FunkPredicate(() => !ShouldChasePlayer()));
+            StateMachine.AddTransition(returnState, idleState, new FunkPredicate(() => Vector3.Distance(transform.position, StartPosition) < 1f));
+
+            StateMachine.SetState(idleState);
+        }
+        
+        private bool ShouldChasePlayer()
+        {
+            if (PlayerTarget == null || !canFollowPlayer) return false;
+
+            CharacterStats playerStats = PlayerTarget.GetComponent<CharacterStats>();
+            if (playerStats == null) return false;
+            
+            if (playerStats.isInGrass && !playerStats.isRevealed)
+            {
+                if (this.MyStats.team != Team.Neutral)
+                {
+                    if (IsAggroed) LoseAggro();
+                    return false;
+                }
+            }
+
+            if (IsAggroed)
+            {
+                if (IsPlayerWithinLeash())
+                {
+                    _aggroLossTimer = 2f;
+                    return true;
+                }
+                else
+                {
+                    _aggroLossTimer -= Time.deltaTime;
+                    return _aggroLossTimer > 0;
+                }
+            }
+            return false;
+        }
+
+        public void AggroOnDamage(Transform attacker)
+        {
+            if (canFollowPlayer)
+            {
+                IsAggroed = true;
+                PlayerTarget = attacker;
+                _aggroLossTimer = 2f;
+                
+                if (PhotonNetwork.InRoom && attacker.TryGetComponent<PhotonView>(out var photonView))
+                {
+                    GetComponent<PhotonView>().RPC(nameof(Rpc_SetTarget), RpcTarget.All, photonView.ViewID);
+                }
+            }
+        }
+
+        [PunRPC]
+        private void Rpc_SetTarget(int targetViewID)
+        {
+            PhotonView targetView = PhotonView.Find(targetViewID);
+            if (targetView != null)
+            {
+                PlayerTarget = targetView.transform;
+                IsAggroed = true;
+                _aggroLossTimer = 2f;
+            }
+        }
+
+        public void LoseAggro() { IsAggroed = false; }
+        
+        private void HandleDeath() 
+        { 
+            StateMachine.enabled = false; 
+            if(Agent.isOnNavMesh) Agent.isStopped = true;
+            Agent.enabled = false; 
+            foreach (Collider col in GetComponentsInChildren<Collider>()) { col.enabled = false; } 
+            StartCoroutine(DeathSequence()); 
+        }
+        
+        private IEnumerator DeathSequence() 
+        { 
+            if (coinPrefab != null)
+            {
+                if (PhotonNetwork.InRoom && PhotonNetwork.IsMasterClient)
+                {
+                    for (int i = 0; i < coinDropAmount; i++) 
+                    { 
+                        Vector3 randomOffset = new Vector3(Random.Range(-0.5f, 0.5f), 0.5f, Random.Range(-0.5f, 0.5f)); 
+                        PhotonNetwork.Instantiate(coinPrefab.name, transform.position + randomOffset, Quaternion.identity); 
+                    }
+                }
+                else if (!PhotonNetwork.InRoom)
+                {
+                    for (int i = 0; i < coinDropAmount; i++)
+                    {
+                        Vector3 randomOffset = new Vector3(Random.Range(-0.5f, 0.5f), 0.5f, Random.Range(-0.5f, 0.5f));
+                        Instantiate(coinPrefab, transform.position + randomOffset, Quaternion.identity);
+                    }
+                }
+            }
+            
+            float fadeDuration = 1.5f; 
+            float timer = 0f; 
+            Color startColor = _materialInstance.color; 
+            while (timer < fadeDuration) 
+            { 
+                timer += Time.deltaTime; 
+                float alpha = Mathf.Lerp(1f, 0f, timer / fadeDuration); 
+                _materialInstance.color = new Color(startColor.r, startColor.g, startColor.b, alpha); 
+                yield return null; 
+            } 
+            
+            if(PhotonNetwork.InRoom)
+            {
+                if(PhotonNetwork.IsMasterClient)
+                {
+                    PhotonNetwork.Destroy(gameObject);
+                }
+            }
+            else
+            {
+                Destroy(gameObject);
+            }
+        }
+        
+        private void HandleLevelUp(int newLevel)
+        {
+            UpdateAgentSpeed();
+        }
+
+        private void UpdateAgentSpeed() 
+        { 
+            if(Agent.isOnNavMesh) Agent.speed = MyStats.baseStats.Speed; 
+        }
+        
+        private void Update() 
+        { 
+            if(!PhotonNetwork.IsMasterClient && PhotonNetwork.InRoom) return;
+
+            if (StateMachine.enabled) StateMachine.Tick(); 
+        }
+
+        public bool IsPlayerInRadius(float radius) { if (PlayerTarget == null) return false; return Vector3.Distance(transform.position, PlayerTarget.position) <= radius; }
+        public bool IsPlayerWithinLeash() { if (PlayerTarget == null) return false; return Vector3.Distance(StartPosition, PlayerTarget.position) <= leashRadius; }
+        public void SetStateColor(Color color) { if (_materialInstance != null) _materialInstance.color = color; }
+        private void OnDrawGizmosSelected() { Gizmos.color = Color.yellow; Gizmos.DrawWireSphere(StartPosition, leashRadius); Gizmos.color = Color.red; Gizmos.DrawWireSphere(transform.position, attackRadius); }
+    }
+}// File: Assets/_Project/Scripts/Core/UIManager.cs
+// Fix: Added an OnDestroy method to unsubscribe from static events,
+// preventing memory leaks and errors in the editor.
+
+using UnityEngine;
+using TMPro;
+
+namespace Platformer
+{
+    public class UIManager : MonoBehaviour
+    {
+        public static UIManager Instance { get; private set; }
+
+        [Header("UI Text Elements")]
+        [SerializeField] private TextMeshProUGUI timerText;
+        [SerializeField] private TextMeshProUGUI homeScoreText;
+        [SerializeField] private TextMeshProUGUI awayScoreText;
+        [SerializeField] private TextMeshProUGUI gameStateText;
+
+        private void Awake()
+        {
+            if (Instance != null && Instance != this)
+            {
+                Destroy(gameObject);
+            }
+            else
+            {
+                Instance = this;
+            }
+        }
+
+        private void OnEnable()
+        {
+            GameStateManager.OnTimerUpdated += UpdateTimer;
+            GameStateManager.OnScoreUpdated += UpdateScore;
+            GameStateManager.OnGameStateChanged += UpdateGameState;
+        }
+
+        private void OnDisable()
+        {
+            // OnDisable is still good practice for enabled/disabled toggling
+            UnsubscribeEvents();
+        }
+
+        // THE FIX IS HERE: This method ensures that when the UIManager object is
+        // destroyed, it properly cleans up its event subscriptions.
+        private void OnDestroy()
+        {
+            UnsubscribeEvents();
+        }
+
+        private void UnsubscribeEvents()
+        {
+            GameStateManager.OnTimerUpdated -= UpdateTimer;
+            GameStateManager.OnScoreUpdated -= UpdateScore;
+            GameStateManager.OnGameStateChanged -= UpdateGameState;
+        }
+
+        private void UpdateTimer(float time)
+        {
+            if (timerText == null) return;
+            int minutes = Mathf.FloorToInt(time / 60f);
+            int seconds = Mathf.FloorToInt(time % 60f);
+            timerText.text = string.Format("{0:00}:{1:00}", minutes, seconds);
+        }
+
+        private void UpdateScore(int homeScore, int awayScore)
+        {
+            if (homeScoreText != null) homeScoreText.text = homeScore.ToString();
+            if (awayScoreText != null) awayScoreText.text = awayScore.ToString();
+        }
+
+        private void UpdateGameState(GameStateManager.GameState state)
+        {
+            if (gameStateText != null) gameStateText.text = state.ToString();
+        }
+    }
+}// File: Assets/_Project/Scripts/Core/Team.cs
+// Purpose: Defines the Team enum for project-wide use.
+
+namespace Platformer
+{
+    public enum Team { Home, Away, Neutral }
+}// File: Assets/_Project/Scripts/Core/StateMachine.cs
+// Version: 2.0 (Fully Refactored)
+
+using UnityEngine;
+using System.Collections.Generic;
+using System;
+using Platformer.Core;
+
+namespace Platformer
+{
+    public class StateMachine : MonoBehaviour
+    {
+        public IState CurrentState { get; private set; }
+
+        public void Tick(Vector2 moveInput)
+        {
+            CurrentState?.Update(moveInput);
+        }
+
+        public void FixedTick()
+        {
+            CurrentState?.FixedUpdate();
+        }
+
+        public void SetState(IState state)
+        {
+            CurrentState?.OnExit();
+            CurrentState = state;
+            CurrentState?.OnEnter();
+        }
+    }
+}// File: Assets/_Project/Scripts/Core/State.cs
+// Version: 1.1 (Refactored)
+// Purpose: Defines the core interface and base class for all states.
+
+using UnityEngine;
+
+namespace Platformer.Core
+{
+    public abstract class State : IState
+    {
+        protected readonly PlayerController player;
+        protected readonly StateMachine stateMachine;
+
+        protected State(PlayerController player, StateMachine stateMachine)
+        {
+            this.player = player;
+            this.stateMachine = stateMachine;
+        }
+
+        public virtual void OnEnter() { }
+        
+        // The Update method now accepts the moveInput vector for robust data flow.
+        public virtual void Update(Vector2 moveInput) { }
+
+        public virtual void FixedUpdate() { }
+
+        public virtual void OnExit() { }
+    }
+
+    public interface IState
+    {
+        void OnEnter();
+        void Update(Vector2 moveInput);
+        void FixedUpdate();
+        void OnExit();
+    }
+}// File: Assets/_Project/Scripts/Core/StatBlock.cs
+// Version: 2.0 (Merged & Architecturally Compliant)
+// Status: APPROVED
+
+using UnityEngine;
+
+namespace Platformer
+{
+    [System.Serializable]
+    public struct StatBlock
+    {
+        [Tooltip("Health Points: The character's total health pool.")]
+        public int HP;
+
+        [Tooltip("Physical Attack: Damage dealt by basic attacks.")]
+        public int Attack;
+
+        [Tooltip("Physical Defense: Damage reduction from basic attacks.")]
+        public int Defense;
+        
+        [Tooltip("Special Attack: Damage dealt by special abilities.")]
+        public int SpecialAttack;
+
+        [Tooltip("Special Defense: Damage reduction from special abilities.")]
+        public int SpecialDefense;
+
+        [Tooltip("Movement Speed: How fast the character moves.")]
+        public float Speed;
+
+        [Tooltip("Critical Hit Rate: Chance to deal extra damage (0.0 to 1.0).")]
+        [Range(0f, 1f)]
+        public float CritRate;
+
+        [Tooltip("Attacks Per Second: How many basic attacks the character can perform in one second.")]
+        public float AttackSpeed;
+    }
+}// File: Assets/_Project/Scripts/Core/ObjectPool.cs
+// Fix: Restored the GetStats() method and PoolStats struct.
+
+using UnityEngine;
+using System.Collections.Generic;
+
+namespace Platformer.Core
+{
+    public class ObjectPool<T> where T : Component, IPoolable
+    {
+        private readonly Queue<T> _pool = new Queue<T>();
+        private readonly GameObject _prefab;
+        private readonly Transform _parent;
+        private readonly int _maxSize;
+        private int _createdCount = 0;
+        
+        public ObjectPool(GameObject prefab, int initialSize = 10, int maxSize = 50, Transform parent = null)
+        {
+            _prefab = prefab;
+            _maxSize = maxSize;
+            _parent = parent;
+            
+            for (int i = 0; i < initialSize; i++)
+            {
+                CreateNewObject(activate: false);
+            }
+            Logger.Info(Logger.LogCategory.Performance, $"Initialized object pool for {_prefab.name} with {initialSize} objects");
+        }
+        
+        private T CreateNewObject(bool activate = true)
+        {
+            var obj = Object.Instantiate(_prefab, _parent);
+            var component = obj.GetComponent<T>();
+            
+            if (component == null)
+            {
+                Logger.Error(Logger.LogCategory.General, $"Prefab {_prefab.name} does not have component {typeof(T).Name}!");
+                Object.Destroy(obj);
+                return null;
+            }
+            
+            obj.SetActive(activate);
+            _createdCount++;
+            if(!activate) _pool.Enqueue(component);
+            return component;
+        }
+        
+        public T Get()
+        {
+            if (_pool.Count > 0)
+            {
+                T obj = _pool.Dequeue();
+                obj.gameObject.SetActive(true);
+                obj.OnPoolGet();
+                return obj;
+            }
+            
+            if (_createdCount < _maxSize)
+            {
+                T newObj = CreateNewObject();
+                newObj.OnPoolGet();
+                return newObj;
+            }
+            
+            Logger.Warning(Logger.LogCategory.Performance, $"Object pool for {_prefab.name} is at capacity ({_maxSize})!");
+            return null;
+        }
+        
+        public void Return(T obj)
+        {
+            if (obj == null) return;
+            
+            obj.gameObject.SetActive(false);
+            obj.OnPoolReturn();
+            _pool.Enqueue(obj);
+        }
+
+        // THE FIX IS HERE: Method and struct restored.
+        public PoolStats GetStats()
+        {
+            return new PoolStats
+            {
+                AvailableCount = _pool.Count,
+                CreatedCount = _createdCount,
+                MaxSize = _maxSize
+            };
+        }
+    }
+
+    public interface IPoolable
+    {
+        void OnPoolGet();
+        void OnPoolReturn();
+    }
+
+    public struct PoolStats
+    {
+        public int AvailableCount;
+        public int CreatedCount;
+        public int MaxSize;
+    }
+
+    public class PoolManager : MonoBehaviour
+    {
+        public static PoolManager Instance { get; private set; }
+        
+        [Header("Pool Configuration")]
+        public GameObject projectilePrefab;
+        public GameObject coinPrefab;
+        public int initialPoolSize = 20;
+        public int maxPoolSize = 100;
+        
+        private ObjectPool<PooledProjectile> _projectilePool;
+        private ObjectPool<PooledCoin> _coinPool;
+        
+        private void Awake()
+        {
+            if (Instance != null && Instance != this)
+            {
+                Destroy(gameObject);
+                return;
+            }
+            Instance = this;
+            DontDestroyOnLoad(gameObject);
+            
+            if (projectilePrefab != null)
+            {
+                _projectilePool = new ObjectPool<PooledProjectile>(projectilePrefab, initialPoolSize, maxPoolSize, transform);
+            }
+            if (coinPrefab != null)
+            {
+                _coinPool = new ObjectPool<PooledCoin>(coinPrefab, initialPoolSize, maxPoolSize, transform);
+            }
+            Logger.Info(Logger.LogCategory.Performance, "PoolManager initialized successfully");
+        }
+        
+        public PooledProjectile GetProjectile() => _projectilePool?.Get();
+        public void ReturnProjectile(PooledProjectile projectile) => _projectilePool?.Return(projectile);
+        
+        public PooledCoin GetCoin() => _coinPool?.Get();
+        public void ReturnCoin(PooledCoin coin) => _coinPool?.Return(coin);
+
+        public void LogPoolStats()
+        {
+            if (_projectilePool != null) Logger.Performance(Logger.LogLevel.Info, $"Projectile Pool - Available: {_projectilePool.GetStats().AvailableCount}");
+            if (_coinPool != null) Logger.Performance(Logger.LogLevel.Info, $"Coin Pool - Available: {_coinPool.GetStats().AvailableCount}");
+        }
+    }
+}// File: Assets/_Project/Scripts/Core/Logger.cs
+// Fix: Restored all the convenience methods (Debug, Info, Error, etc.) that were accidentally removed.
+// Fix: Added [RuntimeInitializeOnLoadMethod] to reset log level on play.
+
+using UnityEngine;
+using System;
+using System.Text;
+using Photon.Pun;
+
+namespace Platformer.Core
+{
+    public static class Logger
+    {
+        public enum LogLevel { Verbose, Debug, Info, Warning, Error, Critical, Off }
+        public enum LogCategory { General, Movement, Combat, Networking, UI, Performance, StateManagement, Scoring, AI }
+        
+        private static LogLevel _currentLogLevel;
+        private static bool _includeStackTrace;
+        private static bool _includeTimestamp;
+        private static bool _includeNetworkInfo;
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void InitializeOnLoad()
+        {
+            _currentLogLevel = LogLevel.Info;
+            _includeStackTrace = true;
+            _includeTimestamp = true;
+            _includeNetworkInfo = true;
+        }
+        
+        public static void SetLogLevel(LogLevel level)
+        {
+            _currentLogLevel = level;
+        }
+        
+        public static void Log(LogLevel level, LogCategory category, string message, UnityEngine.Object context = null)
+        {
+            if (level < _currentLogLevel) return;
+            
+            string formattedMessage = FormatMessage(level, category, message);
+            
+            switch (level)
+            {
+                case LogLevel.Verbose:
+                case LogLevel.Debug:
+                case LogLevel.Info:
+                    UnityEngine.Debug.Log(formattedMessage, context);
+                    break;
+                case LogLevel.Warning:
+                    UnityEngine.Debug.LogWarning(formattedMessage, context);
+                    break;
+                case LogLevel.Error:
+                case LogLevel.Critical:
+                    UnityEngine.Debug.LogError(formattedMessage, context);
+                    break;
+            }
+        }
+        
+        private static string FormatMessage(LogLevel level, LogCategory category, string message)
+        {
+            var sb = new StringBuilder();
+            if (_includeTimestamp) sb.Append($"[{DateTime.Now:HH:mm:ss.fff}] ");
+            sb.Append($"[{level}] [{category}] ");
+            if (_includeNetworkInfo && PhotonNetwork.InRoom) sb.Append($"[{(PhotonNetwork.IsMasterClient ? "M" : "C")}] ");
+            sb.Append(message);
+            return sb.ToString();
+        }
+
+        // --- CONVENIENCE METHODS RESTORED ---
+
+        public static void Verbose(LogCategory category, string message, UnityEngine.Object context = null) => Log(LogLevel.Verbose, category, message, context);
+        public static void Debug(LogCategory category, string message, UnityEngine.Object context = null) => Log(LogLevel.Debug, category, message, context);
+        public static void Info(LogCategory category, string message, UnityEngine.Object context = null) => Log(LogLevel.Info, category, message, context);
+        public static void Warning(LogCategory category, string message, UnityEngine.Object context = null) => Log(LogLevel.Warning, category, message, context);
+        public static void Error(LogCategory category, string message, UnityEngine.Object context = null) => Log(LogLevel.Error, category, message, context);
+        public static void Critical(LogCategory category, string message, UnityEngine.Object context = null) => Log(LogLevel.Critical, category, message, context);
+        
+        // Category-specific helpers
+        public static void Combat(LogLevel level, string message, UnityEngine.Object context = null) => Log(level, LogCategory.Combat, message, context);
+        public static void Performance(LogLevel level, string message, UnityEngine.Object context = null) => Log(level, LogCategory.Performance, message, context);
+
+        public static void Exception(LogCategory category, Exception exception, string additionalMessage = "", UnityEngine.Object context = null)
+        {
+            string message = $"{additionalMessage} - Exception: {exception.Message}";
+            if (_includeStackTrace)
+            {
+                message += $"\n{exception.StackTrace}";
+            }
+            Log(LogLevel.Critical, category, message, context);
+        }
+    }
+}// InputReader.cs (v1.2)
+using UnityEngine;
+using UnityEngine.InputSystem;
+using System;
+
+namespace Platformer
+{
+    [CreateAssetMenu(fileName = "InputReader", menuName = "Platformer/Input Reader")]
+    public class InputReader : ScriptableObject, InputSystem_Actions.IPlayerActions
+    {
+        private InputSystem_Actions _inputActions;
+
+        public event Action<Vector2> MoveEvent;
+        public event Action JumpEvent;
+        public event Action JumpCancelledEvent;
+        public event Action CycleCameraEvent;
+        public event Action AttackEvent;
+        public event Action ScoreEvent;
+        public event Action ScoreCancelledEvent;
+
+        private void OnEnable()
+        {
+            if (_inputActions == null)
+            {
+                _inputActions = new InputSystem_Actions();
+                // **FIX**: The SetCallbacks method must be called on the specific Action Map ("Player").
+                // **WHY**: The main _inputActions object is just a container. The actual event
+                // subscriptions live inside the specific map ('Player', 'UI', etc.) that you define
+                // in the Input Actions asset. This line now correctly registers this script to listen
+                // for events from the Player action map.
+                _inputActions.Player.SetCallbacks(this);
+            }
+            _inputActions.Player.Enable();
+        }
+
+        private void OnDisable()
+        {
+            _inputActions.Player.Disable();
+        }
+
+        public void OnMove(InputAction.CallbackContext context)
+        {
+            MoveEvent?.Invoke(context.ReadValue<Vector2>());
+        }
+
+        public void OnJump(InputAction.CallbackContext context)
+        {
+            if (context.performed) JumpEvent?.Invoke();
+            if (context.canceled) JumpCancelledEvent?.Invoke();
+        }
+
+        public void OnCycleCamera(InputAction.CallbackContext context)
+        {
+            if (context.performed) CycleCameraEvent?.Invoke();
+        }
+
+        public void OnAttack(InputAction.CallbackContext context)
+        {
+            if (context.performed) AttackEvent?.Invoke();
+        }
+
+        public void OnScore(InputAction.CallbackContext context)
+        {
+            if (context.performed) ScoreEvent?.Invoke();
+            if (context.canceled) ScoreCancelledEvent?.Invoke();
+        }
+    }
+}
+// File: Assets/_Project/Scripts/Core/GameManager.cs
+// Fix: Added the 'Platformer.Networking' using directive to resolve the compile error.
+// Refactor: Moved the class into the 'Platformer' namespace and switched to the
+// standardized logger to align with project architecture.
+// Refactor: Removed the obsolete AddScore method.
+
+using UnityEngine;
+using Photon.Pun;
+using Platformer.Networking; // THE FIX IS HERE
+
+namespace Platformer
+{
+    /// <summary>
+    /// Manages game state, player spawning, and online/offline mode transitions.
+    /// Singleton pattern ensures only one instance exists.
+    /// </summary>
+    public class GameManager : MonoBehaviour
+    {
+        public static GameManager Instance { get; private set; }
+
+        [Tooltip("The player prefab to spawn. Must be in a 'Resources' folder.")]
+        [SerializeField]
+        private GameObject playerPrefab;
+        [Tooltip("An empty GameObject in the scene that marks the player's spawn location.")]
+        [SerializeField]
+        private Transform spawnPoint;
+        private GameObject playerInstance;
+
+        private void Awake()
+        {
+            if (Instance != null && Instance != this)
+            {
+                Destroy(gameObject);
+            }
+            else
+            {
+                Instance = this;
+            }
+        }
+
+        void Start()
+        {
+            if (PhotonNetwork.OfflineMode)
+            {
+                SpawnInitialPlayer();
+            }
+        }
+
+        private void SpawnInitialPlayer()
+        {
+            try
+            {
+                if (playerPrefab == null)
+                {
+                    Core.Logger.Critical(Core.Logger.LogCategory.General, "Player Prefab is not set! Cannot spawn player.", this);
+                    return;
+                }
+
+                if (spawnPoint == null)
+                {
+                    Core.Logger.Critical(Core.Logger.LogCategory.General, "Spawn Point is not set! Cannot spawn player.", this);
+                    return;
+                }
+
+                playerInstance = PhotonNetwork.Instantiate(playerPrefab.name, spawnPoint.position, spawnPoint.rotation);
+                
+                if (playerInstance == null)
+                {
+                    Core.Logger.Error(Core.Logger.LogCategory.General, "Failed to instantiate player prefab!", this);
+                    return;
+                }
+                
+                Core.Logger.Info(Core.Logger.LogCategory.General, $"Initial offline player spawned successfully at {spawnPoint.position}");
+            }
+            catch (System.Exception ex)
+            {
+                Core.Logger.Exception(Core.Logger.LogCategory.General, ex, "Exception in SpawnInitialPlayer", this);
+            }
+        }
+
+        /// <summary>
+        /// Transitions from offline to online multiplayer mode.
+        /// </summary>
+        public void GoOnline()
+        {
+            try
+            {
+                if (playerInstance != null)
+                {
+                    PhotonNetwork.Destroy(playerInstance);
+                    playerInstance = null;
+                }
+                
+                PhotonNetwork.OfflineMode = false;
+                
+                ConnectionManager connectionManager = FindFirstObjectByType<ConnectionManager>();
+                if (connectionManager == null)
+                {
+                    Core.Logger.Error(Core.Logger.LogCategory.Networking, "ConnectionManager not found in scene! Cannot go online.", this);
+                    return;
+                }
+                
+                connectionManager.Connect();
+                Core.Logger.Info(Core.Logger.LogCategory.Networking, "Transitioning to online mode...");
+            }
+            catch (System.Exception ex)
+            {
+                Core.Logger.Exception(Core.Logger.LogCategory.Networking, ex, "Exception in GoOnline", this);
+            }
+        }
+
+        /// <summary>
+        /// Spawns a networked player instance when joining a multiplayer room.
+        /// </summary>
+        public void SpawnNetworkedPlayer()
+        {
+            try
+            {
+                if (playerPrefab == null)
+                {
+                    Core.Logger.Critical(Core.Logger.LogCategory.General, "Player Prefab is not set! Cannot spawn networked player.", this);
+                    return;
+                }
+
+                if (spawnPoint == null)
+                {
+                    Core.Logger.Critical(Core.Logger.LogCategory.General, "Spawn Point is not set! Cannot spawn networked player.", this);
+                    return;
+                }
+
+                if (!PhotonNetwork.InRoom)
+                {
+                    Core.Logger.Error(Core.Logger.LogCategory.Networking, "Not in a Photon room! Cannot spawn networked player.", this);
+                    return;
+                }
+
+                playerInstance = PhotonNetwork.Instantiate(playerPrefab.name, spawnPoint.position, spawnPoint.rotation);
+                
+                if (playerInstance == null)
+                {
+                    Core.Logger.Error(Core.Logger.LogCategory.General, "Failed to instantiate networked player prefab!", this);
+                    return;
+                }
+                
+                Core.Logger.Info(Core.Logger.LogCategory.Networking, $"Networked player spawned successfully for {PhotonNetwork.LocalPlayer.NickName}");
+            }
+            catch (System.Exception ex)
+            {
+                Core.Logger.Exception(Core.Logger.LogCategory.General, ex, "Exception in SpawnNetworkedPlayer", this);
+            }
+        }
+    }
+}
+// CombatCalculator.cs (v1.1 - Minor logging for crits)
+using UnityEngine;
+
+namespace Platformer
+{
+    public static class CombatCalculator
+    {
+        private const float EMPOWERED_MULTIPLIER = 1.5f;
+        private const float CRITICAL_MULTIPLIER = 1.5f;
+
+        /// <summary>
+        /// Calculates damage based on a formula inspired by Pokémon Unite.
+        /// </summary>
+        public static int CalculateDamage(CharacterStats attacker, CharacterStats defender, bool isEmpowered)
+        {
+            // --- Step 1: Get Base Stats ---
+            int attackerLevel = attacker.level;
+            int attackerAttack = attacker.baseStats.Attack;
+            int defenderDefense = defender.baseStats.Defense;
+
+            // --- Step 2: Calculate Raw Damage (The Unite Formula Core) ---
+            // This formula is a simplified version of the one found on Unite-DB.
+            // It ensures that the attacker's level and Attack stat are the primary factors,
+            // while the defender's Defense provides damage reduction.
+            // The number 600 is a standard "denominator" used in the real game's math.
+            float rawDamage = (attackerAttack * 1.2f) + (attackerLevel * 20);
+
+            // Apply defense reduction with protection against negative values.
+            int clampedDefense = Mathf.Max(0, defenderDefense);
+            float defenseMitigation = 1 - (clampedDefense / (clampedDefense + 600f));
+            float damageAfterDefense = rawDamage * defenseMitigation;
+
+            // --- Step 3: Apply Multipliers ---
+            // Apply the empowered attack bonus if applicable.
+            if (isEmpowered)
+            {
+                damageAfterDefense *= EMPOWERED_MULTIPLIER;
+            }
+
+            // Check for a critical hit.
+            bool isCritical = Random.value < attacker.baseStats.CritRate;
+            if (isCritical)
+            {
+                damageAfterDefense *= CRITICAL_MULTIPLIER;
+                Debug.Log("Critical Hit!");
+            }
+
+            // --- Step 4: Finalize Damage ---
+            // Add a small amount of randomness (+/- 5%) for variety.
+            float randomModifier = Random.Range(0.95f, 1.05f);
+            int finalDamage = Mathf.RoundToInt(damageAfterDefense * randomModifier);
+
+            // Ensure every attack does at least 1 damage.
+            return Mathf.Max(1, finalDamage);
+        }
+    }
+}// TargetingSystem.cs (v1.0)
+using UnityEngine;
+using System.Collections.Generic;
+
+namespace Platformer
+{
+    // Defines the different ways the system can prioritize targets.
+    public enum TargetingPriority
+    {
+        LowestAbsoluteHP,
+        LowestPercentageHP
+    }
+
+    public class TargetingSystem : MonoBehaviour
+    {
+        [Header("Settings")]
+        [Tooltip("The current targeting priority used by the system.")]
+        public TargetingPriority currentPriority = TargetingPriority.LowestPercentageHP;
+
+        [Tooltip("The maximum range to scan for targets.")]
+        public float targetingRange = 10f;
+
+        [Tooltip("The layer mask that contains enemy characters.")]
+        public LayerMask enemyLayerMask;
+
+        /// <summary>
+        /// Finds the best enemy target based on the current targeting priority.
+        /// </summary>
+        /// <returns>The Transform of the best target, or null if no valid target is found.</returns>
+        public Transform FindBestTarget()
+        {
+            // Find all potential targets within the targeting range.
+            Collider[] hits = Physics.OverlapSphere(transform.position, targetingRange, enemyLayerMask);
+
+            Transform bestTarget = null;
+            float bestTargetValue = float.MaxValue;
+
+            if (hits.Length == 0)
+            {
+                return null; // No targets in range.
+            }
+
+            // Iterate through all found colliders to find the best one.
+            foreach (var hit in hits)
+            {
+                // We need to get the CharacterStats to evaluate the target.
+                if (hit.TryGetComponent<CharacterStats>(out var stats))
+                {
+                    // Skip dead enemies.
+                    if (stats.currentHealth <= 0) continue;
+
+                    float currentTargetValue = 0;
+
+                    // Calculate the value to compare based on the selected priority.
+                    switch (currentPriority)
+                    {
+                        case TargetingPriority.LowestAbsoluteHP:
+                            currentTargetValue = stats.currentHealth;
+                            break;
+                        
+                        case TargetingPriority.LowestPercentageHP:
+                            // Ensure we don't divide by zero if max HP is somehow 0.
+                            if (stats.baseStats.HP > 0)
+                            {
+                                currentTargetValue = (float)stats.currentHealth / stats.baseStats.HP;
+                            }
+                            break;
+                    }
+
+                    // If this target is "better" (has a lower value) than our previous best, it's the new best.
+                    if (currentTargetValue < bestTargetValue)
+                    {
+                        bestTargetValue = currentTargetValue;
+                        bestTarget = hit.transform;
+                    }
+                }
+            }
+
+            return bestTarget;
+        }
+
+        // This allows us to see the targeting range in the editor for easy debugging.
+        private void OnDrawGizmosSelected()
+        {
+            Gizmos.color = Color.cyan;
+            Gizmos.DrawWireSphere(transform.position, targetingRange);
+        }
+    }
+}
+// File: Assets/_Project/Scripts/Characters/PlayerScoring.cs
+// This is the correct, standalone version of the PlayerScoring script.
+// This script should be attached to your Player GameObject.
+
+using UnityEngine;
+using Photon.Pun;
+
+namespace Platformer
+{
+    [RequireComponent(typeof(CharacterStats))]
+    public class PlayerScoring : MonoBehaviour
+    {
+        public int CoinCount { get; private set; } = 0;
+        public GoalZone CurrentGoalZone { get; private set; }
+
+        private CharacterStats _myStats;
+        private PlayerController _playerController;
+
+        private void Awake()
+        {
+            _myStats = GetComponent<CharacterStats>();
+            _playerController = GetComponent<PlayerController>();
+        }
+
+        public void CollectCoin(Coin coin)
+        {
+            if (coin == null) return;
+
+            int value = coin.coinValue;
+            coin.Collect();
+
+            if (PhotonNetwork.InRoom && GetComponent<PhotonView>().IsMine)
+            {
+                GetComponent<PhotonView>().RPC(nameof(Rpc_AddCoin), RpcTarget.All, value);
+            }
+            else if (!PhotonNetwork.InRoom)
+            {
+                Rpc_AddCoin(value);
+            }
+        }
+
+        [PunRPC]
+        private void Rpc_AddCoin(int value)
+        {
+            CoinCount += value;
+        }
+
+        public bool CanStartScoring()
+        {
+            return CurrentGoalZone != null && CoinCount > 0 && (CurrentGoalZone.team == Team.Neutral || CurrentGoalZone.team != _myStats.team);
+        }
+
+        public bool ScorePoints()
+        {
+            if (CurrentGoalZone == null || CoinCount <= 0) return false;
+
+            int pointsToScore = CoinCount;
+            int pointsActuallyScored = CurrentGoalZone.ScorePoints(pointsToScore);
+
+            if (pointsActuallyScored > 0)
+            {
+                if (PhotonNetwork.InRoom && GetComponent<PhotonView>().IsMine)
+                {
+                    GetComponent<PhotonView>().RPC(nameof(Rpc_SpendCoins), RpcTarget.All, pointsActuallyScored);
+                }
+                else if (!PhotonNetwork.InRoom)
+                {
+                    Rpc_SpendCoins(pointsActuallyScored);
+                }
+
+                if (GameStateManager.Instance != null)
+                {
+                    GameStateManager.Instance.AddScore(_myStats.team, pointsActuallyScored);
+                }
+                else
+                {
+                    Core.Logger.Error(Core.Logger.LogCategory.Scoring, "GameStateManager.Instance is null! Ensure the GameStateManager component is on an active GameObject in your scene.", this);
+                }
+                
+                GrantScoringXp(pointsActuallyScored);
+                return true;
+            }
+            return false;
+        }
+
+        [PunRPC]
+        private void Rpc_SpendCoins(int amount)
+        {
+            CoinCount -= amount;
+        }
+
+        private void GrantScoringXp(int pointsScored)
+        {
+            int xpGained = pointsScored + (pointsScored / 5 * 10);
+            _myStats.AddXp(xpGained);
+        }
+
+        public void OnEnterGoalZone(GoalZone zone)
+        {
+            CurrentGoalZone = zone;
+            CurrentGoalZone.StartHealingPlayer(_playerController);
+        }
+
+        public void OnExitGoalZone(GoalZone zone)
+        {
+            if (CurrentGoalZone == zone)
+            {
+                CurrentGoalZone.StopHealingPlayer();
+                CurrentGoalZone = null;
+            }
+        }
+    }
+}// File: Assets/_Project/Scripts/Characters/PlayerMovement.cs
+// Version: 2.0 (Architecturally Compliant)
+
+using UnityEngine;
+
+namespace Platformer
+{
+    [RequireComponent(typeof(CharacterController))]
+    public class PlayerMovement : MonoBehaviour
+    {
+        [Header("Movement Settings")]
+        public float initialJumpHeight = 2f;
+        public float doubleJumpBoostVelocity = 5f;
+        public float jumpHoldDuration = 0.25f;
+        public float jumpCutOffMultiplier = 0.75f;
+        public float gravity = -30f;
+
+        [Header("Ground Check")]
+        [SerializeField] private LayerMask groundLayerMask;
+        [SerializeField] private float groundCheckRadius = 0.5f;
+        [SerializeField] private Vector3 groundCheckOffset;
+        
+        public bool IsGrounded { get; private set; }
+        public Vector3 Velocity { get; set; }
+        public int JumpsRemaining { get; set; }
+
+        private CharacterController _controller;
+        private Vector3 _horizontalVelocity;
+
+        private void Awake()
+        {
+            _controller = GetComponent<CharacterController>();
+        }
+
+        public void Tick(Vector2 input)
+        {
+            CheckGroundedStatus();
+            
+            if (!IsGrounded)
+            {
+                Velocity = new Vector3(Velocity.x, Velocity.y + gravity * Time.deltaTime, Velocity.z);
+            }
+
+            float speed = GetComponent<CharacterStats>().baseStats.Speed;
+            _horizontalVelocity = new Vector3(input.x, 0, input.y) * speed;
+            Velocity = new Vector3(_horizontalVelocity.x, Velocity.y, _horizontalVelocity.z);
+
+            _controller.Move(Velocity * Time.deltaTime);
+
+            if (input != Vector2.zero)
+            {
+                transform.rotation = Quaternion.LookRotation(new Vector3(input.x, 0, input.y));
+            }
+            
+            if (IsGrounded && Velocity.y < 0)
+            {
+                Velocity = new Vector3(Velocity.x, -2f, Velocity.z);
+            }
+        }
+
+        private void CheckGroundedStatus()
+        {
+            Vector3 spherePosition = transform.position + groundCheckOffset;
+            IsGrounded = Physics.CheckSphere(spherePosition, groundCheckRadius, groundLayerMask, QueryTriggerInteraction.Ignore);
+        }
+    }
+}// File: Assets/_Project/Scripts/Characters/PlayerController.cs
+// Version: 2.0 (Fully Refactored & Compliant)
+
+using UnityEngine;
+using Photon.Pun;
+using Platformer.Core;
+
+namespace Platformer
+{
+    [RequireComponent(typeof(StateMachine), typeof(PlayerMovement), typeof(PlayerCombat), typeof(PlayerScoring), typeof(CharacterStats))]
+    public class PlayerController : MonoBehaviour, IPunObservable
+    {
+        [Header("Asset References")]
+        [SerializeField] private InputReader inputReader;
+
+        [Header("Visuals & Debugging")]
+        public GameObject scoringVisual;
+        public Color idleColor = Color.blue;
+        public Color groundedColor = Color.green;
+        public Color airborneColor = Color.red;
+        public Color highJumpColor = Color.yellow;
+        public Color doubleJumpColor = Color.magenta;
+        public Color empoweredAttackColor = Color.white;
+        public Color attackColor = new Color(1f, 0.5f, 0f);
+        
+        public StateMachine StateMachine { get; private set; }
+        public PlayerMovement Movement { get; private set; }
+        public PlayerCombat Combat { get; private set; }
+        public PlayerScoring Scoring { get; private set; }
+        public CharacterStats MyStats { get; private set; }
+        public PhotonView PhotonView { get; private set; }
+        private Material _debugMaterialInstance;
+        
+        public Vector2 MoveInput { get; private set; }
+        public bool IsJumpButtonPressed { get; private set; }
+        public bool IsScoreButtonPressed { get; private set; }
+        
+        private float _jumpBufferTimer;
+        private bool _attackInputPressed;
+        private const float JUMP_BUFFER_TIME = 0.15f;
+        private Vector3 _networkPosition;
+        private Quaternion _networkRotation;
+
+        private void Awake()
+        {
+            StateMachine = GetComponent<StateMachine>();
+            Movement = GetComponent<PlayerMovement>();
+            Combat = GetComponent<PlayerCombat>();
+            Scoring = GetComponent<PlayerScoring>();
+            MyStats = GetComponent<CharacterStats>();
+            PhotonView = GetComponent<PhotonView>();
+            
+            var renderer = GetComponentInChildren<Renderer>();
+            if (renderer != null) _debugMaterialInstance = renderer.material;
+        }
+
+        private void Start()
+        {
+            StateMachine.SetState(new PlayerIdleState(this, StateMachine));
+            if (PhotonView.IsMine) FindFirstObjectByType<CameraController>()?.SetTarget(this.transform);
+        }
+
+        private void OnEnable()
+        {
+            if (inputReader == null) return;
+            inputReader.MoveEvent += OnMove;
+            inputReader.JumpEvent += OnJump;
+            inputReader.JumpCancelledEvent += OnJumpCancelled;
+            inputReader.AttackEvent += OnAttack;
+            inputReader.ScoreEvent += OnScore;
+            inputReader.ScoreCancelledEvent += OnScoreCancelled;
+        }
+
+        private void OnDisable()
+        {
+            if (inputReader == null) return;
+            inputReader.MoveEvent -= OnMove;
+            inputReader.JumpEvent -= OnJump;
+            inputReader.JumpCancelledEvent -= OnJumpCancelled;
+            inputReader.AttackEvent -= OnAttack;
+            inputReader.ScoreEvent -= OnScore;
+            inputReader.ScoreCancelledEvent -= OnScoreCancelled;
+        }
+
+        private void Update()
+        {
+            if (!PhotonView.IsMine) { ApplyNetworkData(); return; }
+            _jumpBufferTimer -= Time.deltaTime;
+            StateMachine.Tick(MoveInput);
+        }
+
+        private void FixedUpdate()
+        {
+            if (!PhotonView.IsMine) return;
+            StateMachine.FixedTick();
+        }
+
+        private void ApplyNetworkData()
+        {
+            transform.position = Vector3.Lerp(transform.position, _networkPosition, Time.deltaTime * 15f);
+            transform.rotation = Quaternion.Lerp(transform.rotation, _networkRotation, Time.deltaTime * 15f);
+        }
+
+        private void OnMove(Vector2 move) => MoveInput = move;
+        private void OnJump() { if (!IsJumpButtonPressed) _jumpBufferTimer = JUMP_BUFFER_TIME; IsJumpButtonPressed = true; }
+        private void OnJumpCancelled() => IsJumpButtonPressed = false;
+        private void OnAttack() => _attackInputPressed = true;
+        private void OnScore() => IsScoreButtonPressed = true;
+        private void OnScoreCancelled() => IsScoreButtonPressed = false;
+        
+        public bool ConsumeAttackPress() { bool p = _attackInputPressed; _attackInputPressed = false; return p; }
+        public bool ConsumeJumpBuffer() { bool b = _jumpBufferTimer > 0f; _jumpBufferTimer = 0f; return b; }
+        public void SetDebugColor(Color color) { if (_debugMaterialInstance != null) _debugMaterialInstance.color = color; }
+        public void SetScoringVisual(bool active) { if (scoringVisual != null) scoringVisual.SetActive(active); }
+
+        public void OnPhotonSerializeView(PhotonStream stream, PhotonMessageInfo info)
+        {
+            if (stream.IsWriting)
+            {
+                stream.SendNext(transform.position);
+                stream.SendNext(transform.rotation);
+            }
+            else
+            {
+                _networkPosition = (Vector3)stream.ReceiveNext();
+                _networkRotation = (Quaternion)stream.ReceiveNext();
+            }
+        }
+    }
+}// File: Assets/_Project/Scripts/Characters/PlayerCombat.cs
+// Version: 1.1 (Method call corrected)
+// Fix: Updated method call from RegisterPlayerHit to RegisterAttack for consistency with CharacterStats.
+
+using UnityEngine;
+using Photon.Pun;
+
+namespace Platformer
+{
+    [RequireComponent(typeof(CharacterStats))]
+    [RequireComponent(typeof(TargetingSystem))]
+    [RequireComponent(typeof(PhotonView))]
+    [RequireComponent(typeof(Animator))]
+    public class PlayerCombat : MonoBehaviour
+    {
+        [Header("Combat Settings")]
+        public float meleeAttackRadius = 2f;
+        public GameObject boostedProjectilePrefab;
+        public float attackMoveSpeedMultiplier = 0.5f;
+        public LayerMask attackLayerMask;
+        public float revealDurationOnAttack = 2f;
+
+        public bool IsAttackOnCooldown => _attackCooldownTimer > 0f;
+        
+        private float _attackCooldownTimer;
+        private CharacterStats _myStats;
+        private TargetingSystem _targetingSystem;
+        private PhotonView _photonView;
+        private Animator _animator;
+
+        private void Awake()
+        {
+            _myStats = GetComponent<CharacterStats>();
+            _targetingSystem = GetComponent<TargetingSystem>();
+            _photonView = GetComponent<PhotonView>();
+            _animator = GetComponent<Animator>();
+        }
+
+        private void Update()
+        {
+            if (_attackCooldownTimer > 0)
+            {
+                _attackCooldownTimer -= Time.deltaTime;
+            }
+        }
+
+        public void ExecuteAttack()
+        {
+            if (IsAttackOnCooldown) return;
+
+            _attackCooldownTimer = 1f / _myStats.baseStats.AttackSpeed;
+            if (_myStats.isInGrass)
+            {
+                _myStats.RevealCharacter(revealDurationOnAttack);
+            }
+            PlayAttackAnimation();
+
+            if (_myStats.IsNextAttackEmpowered())
+            {
+                FireBoostedProjectile();
+                _myStats.ConsumeEmpoweredAttack();
+            }
+            else
+            {
+                PerformMeleeAttack();
+            }
+        }
+
+        private void PerformMeleeAttack()
+        {
+            if (!_photonView.IsMine) return;
+
+            Collider[] hits = Physics.OverlapSphere(transform.position, meleeAttackRadius, attackLayerMask);
+            foreach (var hit in hits)
+            {
+                if (hit.TryGetComponent<Hurtbox>(out var hurtbox) && hurtbox.statsController != _myStats)
+                {
+                    var targetStats = hurtbox.statsController;
+                    if (targetStats != null && targetStats.team != _myStats.team)
+                    {
+                        int damage = CombatCalculator.CalculateDamage(_myStats, targetStats, isEmpowered: false);
+                        
+                        if (PhotonNetwork.InRoom)
+                        {
+                            PhotonView targetView = targetStats.GetComponent<PhotonView>();
+                            if (targetView != null)
+                            {
+                                targetView.RPC("Rpc_TakeDamage", RpcTarget.All, damage, _photonView.ViewID);
+                            }
+                        }
+                        else
+                        {
+                            targetStats.Rpc_TakeDamage(damage, _photonView.ViewID);
+                        }
+
+                        if (targetStats.team != Team.Neutral)
+                        {
+                           _myStats.RegisterAttack(); // CORRECTED
+                        }
+                        
+                        break; 
+                    }
+                }
+            }
+        }
+
+        private void FireBoostedProjectile()
+        {
+            if (boostedProjectilePrefab == null || !_photonView.IsMine) return;
+
+            Transform target = _targetingSystem.FindBestTarget();
+            Vector3 spawnPos = transform.position + transform.forward;
+            Quaternion projectileRotation = target != null ? 
+                Quaternion.LookRotation((target.position - transform.position).normalized) : 
+                transform.rotation;
+            
+            if (PhotonNetwork.InRoom)
+            {
+                var projectileGO = PhotonNetwork.Instantiate(
+                    boostedProjectilePrefab.name, 
+                    spawnPos, 
+                    projectileRotation
+                );
+                
+                var projectile = projectileGO.GetComponent<Projectile>();
+                if (projectile != null)
+                {
+                    int damage = CombatCalculator.CalculateDamage(_myStats, null, isEmpowered: true);
+                    projectile.Initialize(_myStats, damage, true, attackLayerMask);
+                }
+            }
+        }
+        
+        private void PlayAttackAnimation()
+        {
+            if (PhotonNetwork.InRoom)
+            {
+                _photonView.RPC(nameof(Rpc_PlayAttackAnimation), RpcTarget.All);
+            }
+            else
+            {
+                Rpc_PlayAttackAnimation();
+            }
+        }
+
+        [PunRPC]
+        private void Rpc_PlayAttackAnimation()
+        {
+            if (_animator != null && _animator.runtimeAnimatorController != null)
+            {
+                _animator.SetTrigger("Attack");
+            }
+        }
+    }
+}// File: Assets/_Project/Scripts/Characters/CharacterStats.cs
+// Version: 2.2 (Augmented)
+// Fix: Added missing methods and events (Heal, OnLevelUp, RegisterAttack) to resolve CS1061 errors.
+// Fix: Implemented invocation for OnRevealStatusChanged to resolve CS0067 warning.
+
+using UnityEngine;
+using Photon.Pun;
+using System;
+using System.Collections;
+
+namespace Platformer
+{
+    [RequireComponent(typeof(PhotonView))]
+    public class CharacterStats : MonoBehaviourPunCallbacks, IPunObservable
+    {
+        [Header("Configuration")]
+        [SerializeField] private StatBlock _baseStats;
+        public StatBlock baseStats => _baseStats;
+        
+        [SerializeField] private Team _team;
+        public Team team => _team;
+
+        [Header("State")]
+        public int level { get; private set; } = 1;
+        public int currentHealth { get; private set; }
+        public int currentXp { get; private set; }
+        public bool isInGrass { get; private set; }
+        public bool isRevealed { get; private set; }
+        private bool _isDead = false;
+
+        [Header("Empowered Attack")]
+        private const int ATTACKS_UNTIL_EMPOWERED = 3;
+        private int _basicAttackCounter = 0;
+
+        // --- EVENTS ---
+        public event Action OnDied;
+        public event Action OnDamageTaken;
+        public event Action<bool> OnGrassStatusChanged;
+        public event Action<bool> OnRevealStatusChanged;
+        public event Action<int> OnLevelUp;
+
+        private Coroutine _revealCoroutine;
+
+        private void Awake()
+        {
+            currentHealth = _baseStats.HP;
+        }
+        
+        public void AddXp(int amount)
+        {
+            if (_isDead) return;
+            currentXp += amount;
+            
+            int xpForNextLevel = 100 + (level * 50); // Example XP curve
+            if (currentXp >= xpForNextLevel)
+            {
+                level++;
+                currentXp -= xpForNextLevel;
+                currentHealth = baseStats.HP; // Full heal on level up
+                OnLevelUp?.Invoke(level);
+                Core.Logger.Info(Core.Logger.LogCategory.Combat, $"{name} leveled up to {level}!", this);
+            }
+        }
+
+        public void Heal(int amount)
+        {
+            if (photonView.IsMine)
+            {
+                photonView.RPC(nameof(Rpc_Heal), RpcTarget.All, amount);
+            }
+        }
+
+        [PunRPC]
+        private void Rpc_Heal(int amount)
+        {
+            if (_isDead) return;
+            currentHealth = Mathf.Min(currentHealth + amount, baseStats.HP);
+            Core.Logger.Info(Core.Logger.LogCategory.Combat, $"{name} healed for {amount}. Current HP: {currentHealth}", this);
+        }
+
+        [PunRPC]
+        public void Rpc_TakeDamage(int damage, int attackerViewID)
+        {
+            if (_isDead) return;
+            currentHealth -= damage;
+            currentHealth = Mathf.Clamp(currentHealth, 0, _baseStats.HP);
+            OnDamageTaken?.Invoke();
+            if (currentHealth <= 0)
+            {
+                Die(attackerViewID);
+            }
+        }
+        
+        private void Die(int killerViewID)
+        {
+            _isDead = true;
+            OnDied?.Invoke();
+            Core.Logger.Info(Core.Logger.LogCategory.Combat, $"{name} was defeated.", this);
+        }
+
+        #region Empowered Attack Logic
+        public bool IsNextAttackEmpowered()
+        {
+            return _basicAttackCounter >= ATTACKS_UNTIL_EMPOWERED - 1;
+        }
+
+        public void ConsumeEmpoweredAttack()
+        {
+            _basicAttackCounter = 0;
+        }
+
+        // Renamed from RegisterPlayerHit to match codebase dependencies
+        public void RegisterAttack()
+        {
+            if (_basicAttackCounter < ATTACKS_UNTIL_EMPOWERED - 1)
+            {
+                _basicAttackCounter++;
+            }
+        }
+        #endregion
+
+        #region Stealth Logic
+        public void SetInGrassStatus(bool inGrass)
+        {
+            if (isInGrass == inGrass) return; 
+            isInGrass = inGrass;
+            Core.Logger.Debug(Core.Logger.LogCategory.AI, $"Character '{name}' InGrass status set to: {isInGrass}", this);
+            OnGrassStatusChanged?.Invoke(isInGrass);
+        }
+
+        public void RevealCharacter(float duration)
+        {
+            if (_revealCoroutine != null)
+            {
+                StopCoroutine(_revealCoroutine);
+            }
+            _revealCoroutine = StartCoroutine(RevealTimer(duration));
+        }
+
+        private IEnumerator RevealTimer(float duration)
+        {
+            isRevealed = true;
+            OnRevealStatusChanged?.Invoke(true); // Fixes the unused event warning
+            Core.Logger.Debug(Core.Logger.LogCategory.AI, $"Character '{name}' has been revealed for {duration}s.", this);
+            yield return new WaitForSeconds(duration);
+            isRevealed = false;
+            OnRevealStatusChanged?.Invoke(false);
+            Core.Logger.Debug(Core.Logger.LogCategory.AI, $"Character '{name}' is no longer revealed.", this);
+            _revealCoroutine = null;
+        }
+        #endregion
+
+        public void OnPhotonSerializeView(PhotonStream stream, PhotonMessageInfo info)
+        {
+            if (stream.IsWriting)
+            {
+                stream.SendNext(currentHealth);
+                stream.SendNext(level);
+                stream.SendNext(_basicAttackCounter);
+            }
+            else
+            {
+                this.currentHealth = (int)stream.ReceiveNext();
+                this.level = (int)stream.ReceiveNext();
+                this._basicAttackCounter = (int)stream.ReceiveNext();
+            }
+        }
+    }
+}using UnityEngine;
+using System.Collections.Generic;
+
+namespace Platformer
+{
+    /// <summary>
+    /// Manages the game camera by following a target smoothly.
+    /// It uses a list of fixed camera positions (offsets) that the player
+    /// can cycle through using an input action.
+    /// </summary>
+    public class CameraController : MonoBehaviour
+    {
+        [Header("Target")]
+        [Tooltip("The transform the camera will follow. This should be the player.")]
+        [SerializeField] private Transform target;
+
+        [Header("References")]
+        [Tooltip("The Input Reader asset that broadcasts input events.")]
+        [SerializeField] private InputReader inputReader;
+
+        [Header("Settings")]
+        [Tooltip("A list of camera positions relative to the target. You can add as many as you want.")]
+        [SerializeField] private List<Vector3> offsets = new List<Vector3> { new Vector3(0, 5, -10) };
+        
+        [Tooltip("How quickly the camera moves to its target position. Smaller values are faster.")]
+        [SerializeField] private float positionSmoothTime = 0.125f;
+
+        // Private variables to manage state.
+        private int _currentOffsetIndex = 0;
+        private Vector3 _currentPositionVelocity = Vector3.zero;
+
+        private void OnEnable()
+        {
+            if (inputReader != null)
+            {
+                // Subscribe to the camera cycle event when this component is enabled.
+                inputReader.CycleCameraEvent += HandleCycleCamera;
+            }
+        }
+
+        private void OnDisable()
+        {
+            if (inputReader != null)
+            {
+                // It's crucial to unsubscribe when the component is disabled to prevent errors.
+                inputReader.CycleCameraEvent -= HandleCycleCamera;
+            }
+        }
+
+        /// <summary>
+        /// This method is called when the CycleCameraEvent is invoked by the InputReader.
+        /// It moves to the next camera position in the list.
+        /// </summary>
+        private void HandleCycleCamera()
+        {
+            _currentOffsetIndex++;
+
+            // If we've gone past the end of the list, loop back to the beginning.
+            if (_currentOffsetIndex >= offsets.Count)
+            {
+                _currentOffsetIndex = 0;
+            }
+            Debug.Log($"Camera view changed to offset #{_currentOffsetIndex + 1}");
+        }
+        
+        /// <summary>
+        /// LateUpdate is called after all Update functions have been called.
+        /// This is the best place to move a camera to ensure the target has finished its movement for the frame.
+        /// </summary>
+        private void LateUpdate()
+        {
+            if (target == null || offsets.Count == 0) return;
+
+            // Calculate the camera's desired position based on the target and the current offset.
+            Vector3 desiredPosition = target.position + offsets[_currentOffsetIndex];
+            
+            // Use SmoothDamp for frame-rate independent, smooth camera movement.
+            transform.position = Vector3.SmoothDamp(transform.position, desiredPosition, ref _currentPositionVelocity, positionSmoothTime);
+            
+            // Make the camera always look at the player's position.
+            transform.LookAt(target.position + Vector3.up * 1.5f);
+        }
+
+        /// <summary>
+        /// Allows other scripts to set the camera's target at runtime.
+        /// </summary>
+        public void SetTarget(Transform newTarget)
+        {
+            target = newTarget;
+        }
+    }
+}

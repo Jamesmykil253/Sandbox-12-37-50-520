@@ -1,0 +1,366 @@
+{
+  "framework_version": "1.0.0",
+  "created": "2025-08-06",
+  "project_context": {
+    "name": "Unity Multiplayer Platformer",
+    "type": "Unity Game Project",
+    "architecture": "Component-based with State Machine",
+    "networking": "Photon PUN 2",
+    "current_status": "Production Ready Core Systems"
+  },
+  
+  "agent_roles": {
+    "asset_auditor": {
+      "description": "Analyzes existing assets, code, and project structure",
+      "capabilities": [
+        "Codebase analysis and audit",
+        "Asset inventory and quality assessment",
+        "Performance bottleneck identification",
+        "Architecture review and recommendations",
+        "Dependency mapping"
+      ],
+      "typical_outputs": [
+        "audit_reports.md",
+        "asset_inventory.json", 
+        "performance_analysis.md",
+        "technical_debt_assessment.md"
+      ]
+    },
+    
+    "design_consultant": {
+      "description": "Creates design specifications and implementation plans",
+      "capabilities": [
+        "System design and architecture planning",
+        "Feature specification creation",
+        "UX/UI design recommendations",
+        "Technical requirements definition",
+        "Design pattern selection"
+      ],
+      "typical_outputs": [
+        "design_specs.md",
+        "implementation_plans.md",
+        "architecture_diagrams.md",
+        "ui_mockups.md"
+      ]
+    },
+    
+    "code_artisan": {
+      "description": "Implements code solutions and technical features",
+      "capabilities": [
+        "Script implementation and modification",
+        "System integration and refactoring",
+        "Performance optimization",
+        "Bug fixes and enhancements",
+        "Testing and validation"
+      ],
+      "typical_outputs": [
+        "*.cs (Unity scripts)",
+        "prefabs and scenes",
+        "configuration files",
+        "integration tests"
+      ]
+    },
+    
+    "archive_keeper": {
+      "description": "Documents systems and maintains knowledge base",
+      "capabilities": [
+        "Technical documentation creation",
+        "API documentation generation",
+        "Tutorial and guide writing",
+        "Code commenting and annotation",
+        "Knowledge base maintenance"
+      ],
+      "typical_outputs": [
+        "documentation/*.md",
+        "api_reference.md",
+        "implementation_guides.md",
+        "troubleshooting_guides.md"
+      ]
+    }
+  },
+  
+  "coordination_patterns": {
+    "linear_workflow": {
+      "description": "Sequential execution where each agent depends on the previous",
+      "pattern": "Asset Auditor → Design Consultant → Code Artisan → Archive Keeper",
+      "use_cases": [
+        "New feature implementation",
+        "System refactoring",
+        "Performance optimization"
+      ]
+    },
+    
+    "parallel_to_sequential": {
+      "description": "Parallel analysis phase followed by sequential implementation",
+      "pattern": "(Asset Auditor + Design Consultant) → Code Artisan → Archive Keeper",
+      "use_cases": [
+        "Complex feature additions",
+        "Multi-system integration",
+        "Architecture changes"
+      ]
+    },
+    
+    "convergent_documentation": {
+      "description": "All agents contribute to centralized documentation",
+      "pattern": "All Agents → Archive Keeper",
+      "use_cases": [
+        "Project documentation overhaul",
+        "Knowledge base creation",
+        "Release preparation"
+      ]
+    },
+    
+    "iterative_refinement": {
+      "description": "Multiple rounds of analysis, design, implementation, and documentation",
+      "pattern": "Cycle: Asset Auditor → Design Consultant → Code Artisan → Archive Keeper → Repeat",
+      "use_cases": [
+        "Large system overhauls",
+        "Quality improvement initiatives",
+        "Feature set expansions"
+      ]
+    }
+  },
+  
+  "task_types": {
+    "analysis": {
+      "primary_agent": "asset_auditor",
+      "supporting_agents": [],
+      "typical_duration": "1-3 hours",
+      "dependencies": []
+    },
+    
+    "design": {
+      "primary_agent": "design_consultant", 
+      "supporting_agents": ["asset_auditor"],
+      "typical_duration": "2-8 hours",
+      "dependencies": ["analysis"]
+    },
+    
+    "implementation": {
+      "primary_agent": "code_artisan",
+      "supporting_agents": ["design_consultant"],
+      "typical_duration": "4-24 hours", 
+      "dependencies": ["design"]
+    },
+    
+    "documentation": {
+      "primary_agent": "archive_keeper",
+      "supporting_agents": ["all"],
+      "typical_duration": "2-6 hours",
+      "dependencies": ["implementation"]
+    },
+    
+    "testing": {
+      "primary_agent": "code_artisan",
+      "supporting_agents": ["asset_auditor"],
+      "typical_duration": "2-8 hours",
+      "dependencies": ["implementation"]
+    }
+  },
+  
+  "example_complex_task": {
+    "name": "Enhanced Combat System",
+    "description": "Implement advanced combat mechanics with special abilities, combo system, and visual effects",
+    "estimated_total_time": "3-5 days",
+    "complexity": "high",
+    
+    "task_breakdown": [
+      {
+        "id": "combat_analysis",
+        "name": "Combat System Analysis",
+        "agent": "asset_auditor",
+        "type": "analysis",
+        "dependencies": [],
+        "estimated_time": "2 hours",
+        "deliverables": [
+          "current_combat_audit.md",
+          "enhancement_opportunities.md", 
+          "technical_requirements.md"
+        ],
+        "success_criteria": [
+          "Complete analysis of existing PlayerCombat.cs",
+          "Identification of extension points",
+          "Performance impact assessment"
+        ]
+      },
+      
+      {
+        "id": "combat_design",
+        "name": "Combat Enhancement Design",
+        "agent": "design_consultant",
+        "type": "design", 
+        "dependencies": ["combat_analysis"],
+        "estimated_time": "4 hours",
+        "deliverables": [
+          "combat_system_design.md",
+          "ability_specifications.md",
+          "ui_requirements.md"
+        ],
+        "success_criteria": [
+          "Detailed ability system specification",
+          "Combo system design",
+          "UI/UX flow definition"
+        ]
+      },
+      
+      {
+        "id": "ability_system_impl",
+        "name": "Ability System Implementation", 
+        "agent": "code_artisan",
+        "type": "implementation",
+        "dependencies": ["combat_design"],
+        "estimated_time": "12 hours",
+        "deliverables": [
+          "AbilitySystem.cs",
+          "ComboManager.cs", 
+          "Enhanced PlayerCombat.cs",
+          "Ability prefabs and effects"
+        ],
+        "success_criteria": [
+          "Functional ability system",
+          "Combo detection and rewards",
+          "Network synchronization"
+        ]
+      },
+      
+      {
+        "id": "combat_ui_impl",
+        "name": "Combat UI Implementation",
+        "agent": "code_artisan", 
+        "type": "implementation",
+        "dependencies": ["ability_system_impl"],
+        "estimated_time": "8 hours",
+        "deliverables": [
+          "CombatUI.cs",
+          "AbilityButton.cs",
+          "Combat HUD elements"
+        ],
+        "success_criteria": [
+          "Ability cooldown displays",
+          "Combo counter UI",
+          "Health and energy bars"
+        ]
+      },
+      
+      {
+        "id": "combat_testing",
+        "name": "Combat System Testing",
+        "agent": "code_artisan",
+        "type": "testing",
+        "dependencies": ["combat_ui_impl"],
+        "estimated_time": "6 hours", 
+        "deliverables": [
+          "CombatSystemTests.cs",
+          "test_results.md",
+          "performance_metrics.md"
+        ],
+        "success_criteria": [
+          "All combat features functional",
+          "Multiplayer synchronization verified",
+          "Performance within targets"
+        ]
+      },
+      
+      {
+        "id": "combat_documentation",
+        "name": "Combat System Documentation",
+        "agent": "archive_keeper",
+        "type": "documentation", 
+        "dependencies": ["combat_testing"],
+        "estimated_time": "4 hours",
+        "deliverables": [
+          "combat_system_guide.md",
+          "ability_reference.md",
+          "developer_notes.md"
+        ],
+        "success_criteria": [
+          "Complete usage documentation",
+          "Developer implementation guide",
+          "Troubleshooting information"
+        ]
+      }
+    ],
+    
+    "execution_phases": [
+      {
+        "phase": "Analysis & Design",
+        "pattern": "parallel_to_sequential",
+        "agents": ["asset_auditor", "design_consultant"],
+        "duration": "4-6 hours",
+        "tasks": ["combat_analysis", "combat_design"]
+      },
+      
+      {
+        "phase": "Implementation",
+        "pattern": "linear_workflow", 
+        "agents": ["code_artisan"],
+        "duration": "20-24 hours",
+        "tasks": ["ability_system_impl", "combat_ui_impl", "combat_testing"]
+      },
+      
+      {
+        "phase": "Documentation",
+        "pattern": "convergent_documentation",
+        "agents": ["archive_keeper"],
+        "duration": "4 hours", 
+        "tasks": ["combat_documentation"]
+      }
+    ]
+  },
+  
+  "workflow_templates": {
+    "new_feature_template": {
+      "name": "New Feature Implementation",
+      "phases": [
+        {
+          "name": "Discovery",
+          "agents": ["asset_auditor"],
+          "pattern": "analysis",
+          "deliverables": ["requirement_analysis.md", "technical_feasibility.md"]
+        },
+        {
+          "name": "Planning", 
+          "agents": ["design_consultant"],
+          "pattern": "design",
+          "deliverables": ["feature_specification.md", "implementation_plan.md"]
+        },
+        {
+          "name": "Development",
+          "agents": ["code_artisan"],
+          "pattern": "implementation",
+          "deliverables": ["source_code", "tests", "integration"]
+        },
+        {
+          "name": "Documentation",
+          "agents": ["archive_keeper"], 
+          "pattern": "documentation",
+          "deliverables": ["user_guide.md", "api_docs.md", "changelog.md"]
+        }
+      ]
+    },
+    
+    "system_refactor_template": {
+      "name": "System Refactoring",
+      "phases": [
+        {
+          "name": "Current State Analysis",
+          "agents": ["asset_auditor", "design_consultant"],
+          "pattern": "parallel_to_sequential",
+          "deliverables": ["system_audit.md", "improvement_design.md"]
+        },
+        {
+          "name": "Incremental Implementation", 
+          "agents": ["code_artisan"],
+          "pattern": "iterative_refinement", 
+          "deliverables": ["refactored_code", "migration_scripts", "tests"]
+        },
+        {
+          "name": "Knowledge Transfer",
+          "agents": ["archive_keeper"],
+          "pattern": "convergent_documentation",
+          "deliverables": ["migration_guide.md", "architectural_changes.md"]
+        }
+      ]
+    }
+  }
+}
